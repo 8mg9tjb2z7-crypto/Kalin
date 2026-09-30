@@ -213,6 +213,7 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
       <div class="card"><div class="num" id="sumPrevu">0 €</div><div class="lbl">Prévu</div></div>
       <div class="card"><div class="num" id="sumTotal">0 €</div><div class="lbl">Total</div></div>
     </div>
+    <div id="depYearSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;"></div>
     <button class="ghost add-btn" onclick="openListeAchatModal()">🖨️ Liste d'achat (matériel à prévoir)</button>
     <button class="add-btn" onclick="openDepModal()">+ Ajouter une dépense</button>
     <div class="filters">
@@ -327,7 +328,7 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
     </div>
     <div class="grid2">
       <div><label>Catégorie</label>
-        <select id="depCat"><option>Entretien</option><option>Achat équipement</option><option>Assurance</option><option>Amarrage / Port</option><option>Carburant</option><option>Autre</option></select>
+        <div class="cat-picker" id="depCatPicker"></div><input type="hidden" id="depCat">
       </div>
       <div><label>Statut</label>
         <select id="depStatut"><option value="passée">Passée</option><option value="prévue">Prévue</option></select>
@@ -469,7 +470,7 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
 </div>
 
 <script>
-let state = {equipements:[], depenses:[], travaux:[], schemas:[], customEqCats:[], customSchemaCats:[]};
+let state = {equipements:[], depenses:[], travaux:[], schemas:[], customEqCats:[], customSchemaCats:[], customDepCats:[]};
 
 function load(){
   try{
@@ -482,6 +483,7 @@ function load(){
   if(!Array.isArray(state.schemas)) state.schemas = [];
   if(!Array.isArray(state.customEqCats)) state.customEqCats = [];
   if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
+  if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
   state.travaux.forEach(t=>{ if(!Array.isArray(t.achats)) t.achats = []; });
   state.equipements.forEach(eq=>{ if(!Array.isArray(eq.achats)) eq.achats = []; if(!Array.isArray(eq.entretiens)) eq.entretiens = []; eq.open = false; });
 }
@@ -653,8 +655,8 @@ document.addEventListener('click', function(e){
   const picker = chip.closest('.cat-picker');
   if(!picker) return;
   const pickerId = picker.id;
-  const hiddenId = pickerId==='eqCatPicker' ? 'eqCat' : 'schemaCat';
-  const target = pickerId==='eqCatPicker' ? 'eq' : 'schema';
+  const hiddenId = pickerId==='eqCatPicker' ? 'eqCat' : pickerId==='schemaCatPicker' ? 'schemaCat' : 'depCat';
+  const target = pickerId==='eqCatPicker' ? 'eq' : pickerId==='schemaCatPicker' ? 'schema' : 'dep';
   if(chip.classList.contains('perso')){
     openCatPersoModal(target);
     return;
@@ -663,6 +665,10 @@ document.addEventListener('click', function(e){
 });
 function populateSchemaCatOptions(selected){
   renderCatPicker('schemaCatPicker', 'schemaCat', SCHEMA_CATS_FIXES, state.customSchemaCats, selected!==undefined? selected : document.getElementById('schemaCat').value);
+}
+const DEP_CATS_FIXES = ['Entretien','Achat équipement','Assurance','Amarrage / Port','Carburant','Autre'];
+function populateDepCatOptions(selected){
+  renderCatPicker('depCatPicker', 'depCat', DEP_CATS_FIXES, state.customDepCats, selected!==undefined? selected : document.getElementById('depCat').value);
 }
 function openSchemaModal(id){
   document.getElementById('schemaModalTitle').textContent = id? 'Modifier le schéma' : 'Nouveau schéma';
@@ -900,8 +906,9 @@ function importData(event){
       if(!Array.isArray(state.schemas)) state.schemas = [];
       if(!Array.isArray(state.customEqCats)) state.customEqCats = [];
       if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
+      if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
       save();
-      populateEqCatOptions(); populateSchemaCatOptions();
+      populateEqCatOptions(); populateSchemaCatOptions(); populateDepCatOptions();
       renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas();
       document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi.</span>';
     }catch(err){
@@ -964,6 +971,10 @@ function confirmCatPerso(){
     if(!SCHEMA_CATS_FIXES.includes(val) && !state.customSchemaCats.includes(val)) state.customSchemaCats.push(val);
     save();
     populateSchemaCatOptions(val);
+  } else if(_catPersoTarget==='dep'){
+    if(!DEP_CATS_FIXES.includes(val) && !state.customDepCats.includes(val)) state.customDepCats.push(val);
+    save();
+    populateDepCatOptions(val);
   }
   closeModal('ovCatPerso');
 }
@@ -1295,7 +1306,7 @@ function openDepModal(id){
   document.getElementById('depDesc').value = d?.desc||'';
   document.getElementById('depMontant').value = d?.montant||'';
   document.getElementById('depDate').value = d?.date|| new Date().toISOString().slice(0,10);
-  document.getElementById('depCat').value = d?.cat||'Entretien';
+  populateDepCatOptions(d?.cat||'Entretien');
   document.getElementById('depStatut').value = d?.statut||'passée';
   document.getElementById('depEquip').value = d?.equipId||'';
   document.getElementById('ovDep').classList.add('open');
@@ -1428,13 +1439,36 @@ function renderDep(){
   document.getElementById('sumPrevu').textContent = fmtEuro(prevu);
   document.getElementById('sumTotal').textContent = fmtEuro(passe+prevu);
 
+  // Totaux par année (dépenses passées uniquement = argent réellement dépensé)
+  const parYear = {};
+  state.depenses.filter(d=>d.statut==='passée').forEach(d=>{
+    const y = d.date ? d.date.slice(0,4) : 'Sans date';
+    parYear[y] = (parYear[y]||0) + d.montant;
+  });
+  const years = Object.keys(parYear).sort((a,b)=> b.localeCompare(a));
+  const yearSummaryBox = document.getElementById('depYearSummary');
+  if(yearSummaryBox){
+    yearSummaryBox.innerHTML = years.length ? years.map(y=>
+      `<div class="card" style="flex:0 0 auto;padding:8px 14px;"><div style="font-weight:800;color:var(--accent);font-size:1rem;">${y==='Sans date'?y:'Année '+y}</div><div class="num" style="font-size:1.05rem;">${fmtEuro(parYear[y])}</div></div>`
+    ).join('') : '';
+  }
+
   let list = state.depenses.slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
   if(depFilter!=='tous') list = list.filter(d=>d.statut===depFilter);
   const box = document.getElementById('depList');
 
-  const manualHtml = list.map(d=>{
+  // Regroupement par année pour l'affichage de la liste
+  let manualHtml = '';
+  let currentYear = null;
+  list.forEach(d=>{
     const eq = state.equipements.find(e=>e.id===d.equipId);
-    return `<div class="dep-row">
+    const y = d.date ? d.date.slice(0,4) : 'Sans date';
+    if(y !== currentYear){
+      currentYear = y;
+      const yearTotal = list.filter(x=>(x.date? x.date.slice(0,4):'Sans date')===y).reduce((s,x)=>s+x.montant,0);
+      manualHtml += `<div class="subhead" style="margin-top:${manualHtml?'16px':'0'};display:flex;justify-content:space-between;align-items:baseline;"><span style="font-weight:800;color:var(--accent);font-size:1rem;">${y==='Sans date'?y:'Année '+y}</span><span style="font-weight:600;color:var(--sub);font-size:.85rem;">${fmtEuro(yearTotal)}</span></div>`;
+    }
+    manualHtml += `<div class="dep-row">
       <div class="dep-left">
         <div class="d1">${d.desc}</div>
         <div class="d2">${fmtDate(d.date)} · ${d.cat}${eq? ' · '+eq.nom:''} · <span class="badge ${d.statut==='passée'?'done':'warn'}" style="padding:1px 6px;font-size:.68rem;">${d.statut}</span></div>
@@ -1445,7 +1479,7 @@ function renderDep(){
         <button class="icon" onclick="deleteDep('${d.id}')">🗑</button>
       </div>
     </div>`;
-  }).join('');
+  });
 
   window._achatsAPrevoirCache = achatsAPrevoir;
   let achatsHtml = '';
