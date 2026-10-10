@@ -131,6 +131,15 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
 .pdf-msg{color:#fff; text-align:center; padding:30px 10px; font-size:.9rem;}
 .pdf-tools{display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:.82rem; color:var(--sub);}
 .pdf-tools button{padding:4px 12px; font-size:1rem;}
+#ovNoticeView.fs{align-items:stretch; background:#000;}
+#ovNoticeView.fs .modal{max-width:none; width:100vw; height:100vh; height:100dvh; max-height:none; border-radius:0; padding:calc(6px + env(safe-area-inset-top,0px)) 6px calc(6px + env(safe-area-inset-bottom,0px)); background:#2b2e31; color:#fff;}
+#ovNoticeView.fs h2{display:none;}
+#ovNoticeView.fs .pdf-tools{color:#ccc;}
+#ovNoticeView.fs .pdf-scroll{border-radius:0; padding:4px;}
+#ovNoticeView.fs .modal-actions{margin-top:6px;}
+#ovNoticeView.fs img{border:none; background:#000;}
+.pdf-tools .spacer{flex:1;}
+#ovNoticeView.fs button.ghost{color:#fff; border-color:rgba(255,255,255,.55); background:transparent;}
 #ovNoticeView iframe,#ovNoticeView img{flex:1; width:100%; border:1px solid var(--border); border-radius:8px; background:#fff; object-fit:contain; min-height:0;}
 .overflow-x{overflow-x:auto;}
 .liste-table{width:100%; border-collapse:collapse; font-size:0.82rem;}
@@ -487,6 +496,7 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
     </div>
     <div id="noticeViewBody" style="flex:1; display:flex; min-height:0;"></div>
     <div class="modal-actions">
+      <button class="ghost" id="noticeViewFs" onclick="toggleNoticeFs()">⛶ Plein écran</button>
       <button class="ghost" id="noticeViewShare" onclick="shareCurrentNotice()">Partager / Ouvrir dans…</button>
       <button onclick="closeNoticeView()">Fermer</button>
     </div>
@@ -716,6 +726,31 @@ async function renderPdfPage(d, w, token){
     await page.render({canvasContext: c.getContext('2d'), viewport: vp}).promise;
   }catch(e){ delete d.dataset.rendered; }
 }
+function toggleNoticeFs(force){
+  const ov = document.getElementById('ovNoticeView');
+  const on = (force===undefined) ? !ov.classList.contains('fs') : force;
+  ov.classList.toggle('fs', on);
+  document.getElementById('noticeViewFs').textContent = on ? '↙ Quitter le plein écran' : '⛶ Plein écran';
+  try{
+    if(on && ov.requestFullscreen && !document.fullscreenElement) ov.requestFullscreen().catch(()=>{});
+    else if(on && ov.webkitRequestFullscreen && !document.webkitFullscreenElement) ov.webkitRequestFullscreen();
+    else if(!on && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+    else if(!on && document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }catch(e){}
+  if(_pdfDoc){
+    const scroll = document.getElementById('pdfScroll');
+    const ratio = scroll ? scroll.scrollTop / Math.max(1, scroll.scrollHeight) : 0;
+    setTimeout(()=>{ buildPdfPages(_pdfToken).then(()=>{ if(scroll) scroll.scrollTop = ratio * scroll.scrollHeight; }); }, 250);
+  }
+}
+function _onFsChange(){
+  const ov = document.getElementById('ovNoticeView');
+  if(!document.fullscreenElement && !document.webkitFullscreenElement && ov.classList.contains('fs') && ov.dataset.nativeFs==='1'){ ov.dataset.nativeFs=''; toggleNoticeFs(false); }
+  else if(document.fullscreenElement || document.webkitFullscreenElement){ ov.dataset.nativeFs='1'; }
+}
+document.addEventListener('fullscreenchange', _onFsChange);
+document.addEventListener('webkitfullscreenchange', _onFsChange);
+window.addEventListener('resize', ()=>{ clearTimeout(window._pdfRs); window._pdfRs=setTimeout(()=>{ if(_pdfDoc && document.getElementById('ovNoticeView').classList.contains('open')) buildPdfPages(_pdfToken); }, 400); });
 function pdfZoom(dir){
   if(!_pdfDoc) return;
   const z = Math.min(3, Math.max(1, _pdfZoom + dir*0.5));
@@ -733,6 +768,9 @@ function pdfFallback(){
     <iframe src="${_curNotice.url}"></iframe></div>`;
 }
 function closeNoticeView(){
+  const _ov = document.getElementById('ovNoticeView');
+  if(_ov.classList.contains('fs')){ _ov.dataset.nativeFs=''; _ov.classList.remove('fs'); document.getElementById('noticeViewFs').textContent='⛶ Plein écran';
+    try{ if(document.fullscreenElement) document.exitFullscreen(); else if(document.webkitFullscreenElement) document.webkitExitFullscreen(); }catch(e){} }
   _pdfToken++;
   if(_pdfObs){ _pdfObs.disconnect(); _pdfObs=null; }
   if(_pdfDoc){ try{ _pdfDoc.destroy(); }catch(e){} _pdfDoc=null; }
