@@ -196,6 +196,17 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
   #printListArea table{width:100%; border-collapse:collapse; font-size:0.85rem;}
   #printListArea th,#printListArea td{border:1px solid #999; padding:6px 8px; text-align:left;}
   #printListArea tfoot td{font-weight:700;}
+  #printListArea .pt-task{border:1px solid #999; border-radius:6px; padding:8px 10px; margin-bottom:10px; page-break-inside:avoid; break-inside:avoid; font-size:0.85rem;}
+  #printListArea .pt-head{display:flex; gap:10px; align-items:flex-start;}
+  #printListArea .pt-box{width:16px; height:16px; border:1.5px solid #000; flex:none; margin-top:2px;}
+  #printListArea .pt-main{flex:1;}
+  #printListArea .pt-title{font-weight:700; font-size:0.95rem;}
+  #printListArea .pt-meta{color:#444; font-size:0.78rem; margin-top:2px;}
+  #printListArea .pt-date{text-align:right; font-size:0.78rem; white-space:nowrap;}
+  #printListArea .pt-body{margin:6px 0 0 26px;}
+  #printListArea .pt-body ul,#printListArea .pt-body ol{margin:3px 0; padding-left:18px;}
+  #printListArea .pt-body p{margin:2px 0;}
+  #printListArea .pt-done{margin:8px 0 0 26px; font-size:0.75rem; color:#333;}
 }
 #toast{position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%) translateY(20px); background:#1c1f22; color:#fff; padding:10px 18px; border-radius:10px; font-size:0.85rem; box-shadow:0 4px 14px rgba(0,0,0,.3); opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; z-index:9999; max-width:88vw; text-align:center;}
 #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
@@ -1491,21 +1502,25 @@ function goToEquip(eqId){
   if(eq){ eq.open = true; save(); renderEquip(); }
   setTimeout(()=>{ document.getElementById('eq-'+eqId)?.scrollIntoView({behavior:'smooth', block:'start'}); }, 50);
 }
+let _echGroups = {retard:[], mois:[], avenir:[]};
 function renderEcheances(){
   const today = new Date().toISOString().slice(0,10);
-  const retard=[], semaine=[], mois=[];
+  const retard=[], mois=[], avenir=[];
   state.equipements.forEach(eq=>{
     (eq.entretiens||[]).forEach(ent=>{
-      if(!ent.derniere) return;
+      const base = {eqId:eq.id, eqNom:eq.nom, eqCat:eq.categorie, desc:ent.desc, perVal:ent.perVal, perUnit:ent.perUnit, derniere:ent.derniere||''};
+      if(!ent.derniere){ avenir.push({...base, prochaine:'', diffDays:Infinity}); return; }
       const prochaine = addMonths(ent.derniere, ent.perVal, ent.perUnit);
       const diffDays = Math.round((new Date(prochaine)-new Date(today))/86400000);
-      const item = {eqId:eq.id, eqNom:eq.nom, desc:ent.desc, prochaine, diffDays};
+      const item = {...base, prochaine, diffDays};
       if(diffDays < 0) retard.push(item);
-      else if(diffDays <= 7) semaine.push(item);
       else if(diffDays <= 30) mois.push(item);
+      else avenir.push(item);
     });
   });
-  [retard, semaine, mois].forEach(arr=>arr.sort((a,b)=>a.prochaine.localeCompare(b.prochaine)));
+  const byDate = (a,b)=> (a.prochaine||'9999').localeCompare(b.prochaine||'9999');
+  [retard, mois, avenir].forEach(arr=>arr.sort(byDate));
+  _echGroups = {retard, mois, avenir};
 
   function rowsHtml(arr, cls){
     if(arr.length===0) return '<div class="empty" style="padding:14px">Rien ici</div>';
@@ -1513,24 +1528,50 @@ function renderEcheances(){
       <div class="mini-item" style="cursor:pointer" onclick="goToEquip('${it.eqId}')">
         <div>${rtTitle(it.desc)}<div style="font-size:.72rem;color:var(--sub)">${it.eqNom}</div></div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span class="badge ${cls}">${fmtDate(it.prochaine)}</span>
+          <span class="badge ${it.prochaine? cls : 'ok'}">${it.prochaine? fmtDate(it.prochaine) : 'Sans date'}</span>
         </div>
       </div>`).join('');
   }
+  const head = (titre, key, n)=>`<div class="subhead" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>${titre} (${n})</span>
+      ${n? `<button class="ghost small" onclick="printEcheances('${key}')">🖨️ Imprimer</button>`:''}
+    </div>`;
 
   document.getElementById('echeancesList').innerHTML = `
     <div class="card">
-      <div class="subhead">⚠️ En retard (${retard.length})</div>
+      ${head('⚠️ En retard','retard',retard.length)}
       ${rowsHtml(retard,'danger')}
     </div>
     <div class="card">
-      <div class="subhead">📅 Cette semaine (${semaine.length})</div>
-      ${rowsHtml(semaine,'warn')}
+      ${head('🗓️ Ce mois-ci','mois',mois.length)}
+      ${rowsHtml(mois,'warn')}
     </div>
     <div class="card">
-      <div class="subhead">🗓️ Ce mois-ci (${mois.length})</div>
-      ${rowsHtml(mois,'ok')}
+      ${head('🔭 À venir','avenir',avenir.length)}
+      ${rowsHtml(avenir,'ok')}
     </div>`;
+}
+const ECH_TITRES = {retard:'Entretiens en retard', mois:'Entretiens à faire ce mois-ci', avenir:'Entretiens à venir'};
+function printEcheances(key){
+  const items = _echGroups[key]||[];
+  const today = new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const blocs = items.map(it=>{
+    const body = rtBody(it.desc);
+    return `<div class="pt-task">
+      <div class="pt-head"><span class="pt-box"></span>
+        <div class="pt-main"><div class="pt-title">${rtTitle(it.desc)}</div>
+          <div class="pt-meta">${rtEsc(it.eqNom)}${it.eqCat? ' · '+rtEsc(it.eqCat):''} · tous les ${it.perVal} ${it.perUnit}${it.derniere? ' · dernière : '+fmtDate(it.derniere):''}</div></div>
+        <div class="pt-date">${it.prochaine? 'Échéance<br><b>'+fmtDate(it.prochaine)+'</b>' : 'Sans date'}</div>
+      </div>
+      ${body? '<div class="pt-body">'+rtFormat(body)+'</div>':''}
+      <div class="pt-done">Fait le : ____________ &nbsp; Par : ____________ &nbsp; Remarques : ______________________________</div>
+    </div>`;
+  }).join('') || '<p>Aucune tâche.</p>';
+  document.getElementById('printListArea').innerHTML = `
+    <h1>⛵ Kalin — ${ECH_TITRES[key]}</h1>
+    <div class="print-date">${items.length} tâche${items.length>1?'s':''} · imprimé le ${today}</div>
+    ${blocs}`;
+  setTimeout(()=>window.print(), 50);
 }
 
 // ---- Mini traitement de texte (descriptions) ----
