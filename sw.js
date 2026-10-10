@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kalin-cache-v3';
+const CACHE_NAME = 'kalin-cache-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -7,9 +7,21 @@ const ASSETS = [
   './icon-512.png'
 ];
 
+// Lecteur PDF (pdf.js) : mis en cache pour lire les notices hors connexion
+const PDFJS = [
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+];
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(ASSETS).then(() =>
+        Promise.all(PDFJS.map((u) =>
+          fetch(u, { mode: 'cors' }).then((r) => { if (r.ok) return cache.put(u, r); }).catch(() => {})
+        ))
+      )
+    )
   );
   self.skipWaiting();
 });

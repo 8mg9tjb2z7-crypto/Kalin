@@ -124,6 +124,13 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
 .nthumb img{width:100%; height:100%; object-fit:cover; display:block;}
 .nthumb .nthumb-del{position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:.75rem; line-height:24px; padding:0; cursor:pointer;}
 #ovNoticeView .modal{max-width:900px; width:96vw; height:90vh; display:flex; flex-direction:column;}
+.pdf-scroll{flex:1; min-height:0; overflow:auto; -webkit-overflow-scrolling:touch; background:#525659; border-radius:8px; padding:8px;}
+.pdf-page{margin:0 auto 8px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.35); position:relative;}
+.pdf-page canvas{display:block; width:100%; height:100%;}
+.pdf-page .pdf-num{position:absolute; right:6px; bottom:4px; font-size:.7rem; color:#888;}
+.pdf-msg{color:#fff; text-align:center; padding:30px 10px; font-size:.9rem;}
+.pdf-tools{display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:.82rem; color:var(--sub);}
+.pdf-tools button{padding:4px 12px; font-size:1rem;}
 #ovNoticeView iframe,#ovNoticeView img{flex:1; width:100%; border:1px solid var(--border); border-radius:8px; background:#fff; object-fit:contain; min-height:0;}
 .overflow-x{overflow-x:auto;}
 .liste-table{width:100%; border-collapse:collapse; font-size:0.82rem;}
@@ -473,6 +480,11 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
 <div class="overlay" id="ovNoticeView">
   <div class="modal">
     <h2 id="noticeViewTitle">Notice</h2>
+    <div class="pdf-tools" id="pdfTools" style="display:none">
+      <button class="ghost" onclick="pdfZoom(-1)">−</button>
+      <button class="ghost" onclick="pdfZoom(1)">+</button>
+      <span id="pdfInfo"></span>
+    </div>
     <div id="noticeViewBody" style="flex:1; display:flex; min-height:0;"></div>
     <div class="modal-actions">
       <button class="ghost" id="noticeViewShare" onclick="shareCurrentNotice()">Partager / Ouvrir dans…</button>
@@ -550,6 +562,7 @@ async function noticeDel(id){
   }catch(e){}
 }
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+window.addEventListener('load', ()=>{ setTimeout(()=>{ if(navigator.onLine) loadPdfLib().catch(()=>{}); }, 3000); });
 
 let _formNotices = [];      // notices de la fiche en cours d'édition
 let _formNoticesRemoved = [];
@@ -616,11 +629,114 @@ async function openNotice(eqId, nId){
   _curNotice = {blob, url, nom: meta?.nom || 'notice.pdf'};
   document.getElementById('noticeViewTitle').textContent = _curNotice.nom;
   const body = document.getElementById('noticeViewBody');
-  body.innerHTML = (blob.type||'').startsWith('image/') ? `<img src="${url}" alt="">` : `<iframe src="${url}"></iframe>`;
+  const isImg = (blob.type||'').startsWith('image/') || isImgNotice(meta||{});
+  document.getElementById('pdfTools').style.display = 'none';
+  if(isImg) body.innerHTML = `<img src="${url}" alt="">`;
+  else { body.innerHTML = '<div class="pdf-scroll" id="pdfScroll"><div class="pdf-msg">Ouverture de la notice…</div></div>'; showPdf(blob); }
   document.getElementById('noticeViewShare').style.display = (_dl || navigator.share) ? '' : 'none';
   document.getElementById('ovNoticeView').classList.add('open');
 }
+/* ===== Affichage PDF toutes pages (pdf.js) ===== */
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let _pdfLibP = null, _pdfDoc = null, _pdfZoom = 1, _pdfObs = null, _pdfToken = 0;
+function loadPdfLib(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(_pdfLibP) return _pdfLibP;
+  _pdfLibP = new Promise((res,rej)=>{
+    const sc = document.createElement('script');
+    sc.src = PDFJS_URL; sc.crossOrigin = 'anonymous';
+    sc.onload = async ()=>{
+      const lib = window.pdfjsLib;
+      if(!lib){ rej(new Error('pdfjs')); return; }
+      try{
+        const txt = await (await fetch(PDFJS_WORKER_URL, {mode:'cors'})).text();
+        lib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([txt], {type:'text/javascript'}));
+      }catch(e){ lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL; }
+      res(lib);
+    };
+    sc.onerror = ()=>{ _pdfLibP = null; rej(new Error('pdfjs')); };
+    document.head.appendChild(sc);
+  });
+  return _pdfLibP;
+}
+async function showPdf(blob){
+  const token = ++_pdfToken;
+  const scroll = document.getElementById('pdfScroll');
+  let lib;
+  try{ lib = await loadPdfLib(); }
+  catch(e){ if(token===_pdfToken) pdfFallback(); return; }
+  try{
+    const data = new Uint8Array(await blob.arrayBuffer());
+    const doc = await lib.getDocument({data}).promise;
+    if(token!==_pdfToken){ doc.destroy(); return; }
+    _pdfDoc = doc; _pdfZoom = 1;
+    document.getElementById('pdfTools').style.display = '';
+    document.getElementById('pdfInfo').textContent = doc.numPages + (doc.numPages>1?' pages':' page');
+    await buildPdfPages(token);
+  }catch(e){ console.error(e); if(token===_pdfToken) pdfFallback(); }
+}
+async function buildPdfPages(token){
+  const scroll = document.getElementById('pdfScroll');
+  if(!scroll || !_pdfDoc) return;
+  if(_pdfObs){ _pdfObs.disconnect(); _pdfObs=null; }
+  const first = await _pdfDoc.getPage(1);
+  const v1 = first.getViewport({scale:1});
+  const baseW = Math.max(200, scroll.clientWidth - 16);
+  const w = baseW * _pdfZoom;
+  scroll.innerHTML = '';
+  for(let i=1;i<=_pdfDoc.numPages;i++){
+    const d = document.createElement('div');
+    d.className = 'pdf-page'; d.dataset.page = i;
+    d.style.width = w+'px'; d.style.height = (w * v1.height / v1.width)+'px';
+    d.innerHTML = '<span class="pdf-num">'+i+'</span>';
+    scroll.appendChild(d);
+  }
+  _pdfObs = new IntersectionObserver(entries=>{
+    entries.forEach(en=>{
+      const d = en.target;
+      if(en.isIntersecting){ if(!d.dataset.rendered) renderPdfPage(d, w, token); }
+      else if(d.dataset.rendered){ const c=d.querySelector('canvas'); if(c){ c.width=0; c.height=0; c.remove(); } delete d.dataset.rendered; }
+    });
+  }, {root: scroll, rootMargin:'1200px 0px'});
+  scroll.querySelectorAll('.pdf-page').forEach(d=>_pdfObs.observe(d));
+}
+async function renderPdfPage(d, w, token){
+  d.dataset.rendered = '1';
+  try{
+    const page = await _pdfDoc.getPage(+d.dataset.page);
+    if(token!==_pdfToken || !d.dataset.rendered) return;
+    const v = page.getViewport({scale:1});
+    const dpr = Math.min(window.devicePixelRatio||1, 2);
+    const vp = page.getViewport({scale: (w / v.width) * dpr});
+    d.style.height = (w * v.height / v.width)+'px';
+    const c = document.createElement('canvas');
+    c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+    d.insertBefore(c, d.firstChild);
+    await page.render({canvasContext: c.getContext('2d'), viewport: vp}).promise;
+  }catch(e){ delete d.dataset.rendered; }
+}
+function pdfZoom(dir){
+  if(!_pdfDoc) return;
+  const z = Math.min(3, Math.max(1, _pdfZoom + dir*0.5));
+  if(z===_pdfZoom) return;
+  const scroll = document.getElementById('pdfScroll');
+  const ratio = scroll.scrollTop / Math.max(1, scroll.scrollHeight);
+  _pdfZoom = z;
+  buildPdfPages(_pdfToken).then(()=>{ scroll.scrollTop = ratio * scroll.scrollHeight; });
+}
+function pdfFallback(){
+  if(!_curNotice) return;
+  const body = document.getElementById('noticeViewBody');
+  body.innerHTML = `<div style="display:flex;flex-direction:column;flex:1;min-height:0;gap:6px">
+    <div style="font-size:.8rem;color:var(--sub)">Affichage complet indisponible ici (connexion nécessaire la première fois). Utilise « Partager / Ouvrir dans… » pour lire toutes les pages.</div>
+    <iframe src="${_curNotice.url}"></iframe></div>`;
+}
 function closeNoticeView(){
+  _pdfToken++;
+  if(_pdfObs){ _pdfObs.disconnect(); _pdfObs=null; }
+  if(_pdfDoc){ try{ _pdfDoc.destroy(); }catch(e){} _pdfDoc=null; }
+  document.getElementById('pdfTools').style.display='none';
   document.getElementById('ovNoticeView').classList.remove('open');
   document.getElementById('noticeViewBody').innerHTML='';
   if(_curNotice){ setTimeout(()=>URL.revokeObjectURL(_curNotice.url), 60000); _curNotice=null; }
