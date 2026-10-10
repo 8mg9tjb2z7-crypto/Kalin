@@ -139,6 +139,20 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
 #ovNoticeView.fs .modal-actions{margin-top:6px;}
 #ovNoticeView.fs img{border:none; background:#000;}
 .pdf-tools .spacer{flex:1;}
+.rt-toolbar{display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 6px;}
+.rt-toolbar button{padding:6px 10px; font-size:.82rem;}
+textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
+.rt-out{font-size:.82rem; line-height:1.45; color:var(--text);}
+.rt-out ul,.rt-out ol{margin:4px 0; padding-left:20px;}
+.rt-out li{margin:1px 0;}
+.rt-out p{margin:3px 0;}
+.ent-details{margin-top:6px; padding:8px 10px; background:var(--bg); border-radius:8px;}
+.ent-item{display:block;}
+.ent-top{display:flex; align-items:flex-start; gap:8px;}
+.ent-title{font-weight:600; overflow-wrap:anywhere;}
+.ent-actions{display:flex; gap:2px; flex:none;}
+.ent-foot{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:5px;}
+.ent-toggle{background:none; border:none; color:var(--accent); font-size:.75rem; padding:2px 0; cursor:pointer; font-weight:600;}
 #ovNoticeView.fs button.ghost{color:#fff; border-color:rgba(255,255,255,.55); background:transparent;}
 #ovNoticeView iframe,#ovNoticeView img{flex:1; width:100%; border:1px solid var(--border); border-radius:8px; background:#fff; object-fit:contain; min-height:0;}
 .overflow-x{overflow-x:auto;}
@@ -305,7 +319,15 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
   <div class="modal">
     <h2>Tâche d'entretien</h2>
     <input type="hidden" id="entEquipId"><input type="hidden" id="entId">
-    <label>Description</label><input id="entDesc" placeholder="Ex : Vidange moteur">
+    <label>Description</label>
+    <div class="rt-toolbar">
+      <button type="button" class="ghost small" onclick="rtList('entDesc','• ')">• Puce</button>
+      <button type="button" class="ghost small" onclick="rtList('entDesc','– ')">– Tiret</button>
+      <button type="button" class="ghost small" onclick="rtList('entDesc','1. ')">1. Liste</button>
+      <button type="button" class="ghost small" onclick="rtBold('entDesc')"><b>G</b> Gras</button>
+    </div>
+    <textarea id="entDesc" class="rt-area" placeholder="1re ligne = titre (ex : Vidange moteur)&#10;Lignes suivantes = détail :&#10;• Huile 15W40, 6 L&#10;• Filtre réf. …"></textarea>
+    <div style="font-size:.72rem;color:var(--sub);margin-top:3px">La 1re ligne sert de titre. Retour à la ligne dans une liste = nouvelle puce.</div>
     <div class="grid2">
       <div><label>Dernière réalisation</label><input type="date" id="entDerniere"></div>
       <div>
@@ -316,7 +338,6 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
         </div>
       </div>
     </div>
-    <label>Notes</label><textarea id="entNotes"></textarea>
     <div class="modal-actions">
       <button class="ghost" onclick="closeModal('ovEntretien')">Annuler</button>
       <button onclick="saveEntretien()">Enregistrer</button>
@@ -535,7 +556,9 @@ function load(){
   if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
   if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
   state.travaux.forEach(t=>{ if(!Array.isArray(t.achats)) t.achats = []; });
-  state.equipements.forEach(eq=>{ if(!Array.isArray(eq.achats)) eq.achats = []; if(!Array.isArray(eq.entretiens)) eq.entretiens = []; eq.open = false; });
+  state.equipements.forEach(eq=>{ if(!Array.isArray(eq.achats)) eq.achats = []; if(!Array.isArray(eq.entretiens)) eq.entretiens = []; eq.open = false;
+    eq.entretiens.forEach(en=>{ if(en.notes && String(en.notes).trim()){ en.desc = (en.desc||'') + '\n\n' + String(en.notes).trim(); } delete en.notes; });
+  });
 }
 function save(){
   try{ localStorage.setItem('bord_data', JSON.stringify(state)); }
@@ -1396,13 +1419,19 @@ function renderEquip(){
 function renderEquipCard(eq){
     const entretiensHtml = (eq.entretiens||[]).map(ent=>{
       const st = entretienStatus(ent);
-      return `<div class="mini-item">
-        <div>${ent.desc}<div style="font-size:.72rem;color:var(--sub)">tous les ${ent.perVal} ${ent.perUnit}${ent.derniere? ' · dernière : '+fmtDate(ent.derniere):''}</div></div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span class="badge ${st.cls}">${st.label}</span>
-          <button class="icon" onclick="openEntretienModal('${eq.id}','${ent.id}')">✏️</button>
-          <button class="icon" onclick="deleteEntretien('${eq.id}','${ent.id}')">🗑</button>
+      const body = rtBody(ent.desc);
+      return `<div class="mini-item ent-item">
+        <div class="ent-top">
+          <div style="flex:1;min-width:0"><div class="ent-title">${rtTitle(ent.desc)}</div><div style="font-size:.72rem;color:var(--sub)">tous les ${ent.perVal} ${ent.perUnit}${ent.derniere? ' · dernière : '+fmtDate(ent.derniere):''}</div></div>
+          <div class="ent-actions">
+            <button class="icon" onclick="openEntretienModal('${eq.id}','${ent.id}')">✏️</button>
+            <button class="icon" onclick="deleteEntretien('${eq.id}','${ent.id}')">🗑</button>
+          </div>
         </div>
+        <div class="ent-foot"><span class="badge ${st.cls}">${st.label}</span>
+          ${body? `<button class="ent-toggle" onclick="event.stopPropagation();const d=this.closest('.ent-item').querySelector('.ent-details');d.hidden=!d.hidden;this.textContent=d.hidden?'▸ Voir le détail':'▾ Masquer le détail'">▸ Voir le détail</button>`:''}
+        </div>
+        ${body? `<div class="ent-details rt-out" hidden>${rtFormat(body)}</div>`:''}
       </div>`;
     }).join('') || '<div class="empty" style="padding:10px">Aucune tâche d\'entretien</div>';
 
@@ -1482,7 +1511,7 @@ function renderEcheances(){
     if(arr.length===0) return '<div class="empty" style="padding:14px">Rien ici</div>';
     return arr.map(it=>`
       <div class="mini-item" style="cursor:pointer" onclick="goToEquip('${it.eqId}')">
-        <div>${it.desc}<div style="font-size:.72rem;color:var(--sub)">${it.eqNom}</div></div>
+        <div>${rtTitle(it.desc)}<div style="font-size:.72rem;color:var(--sub)">${it.eqNom}</div></div>
         <div style="display:flex;align-items:center;gap:6px;">
           <span class="badge ${cls}">${fmtDate(it.prochaine)}</span>
         </div>
@@ -1504,32 +1533,93 @@ function renderEcheances(){
     </div>`;
 }
 
+// ---- Mini traitement de texte (descriptions) ----
+function rtEsc(t){ return String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function rtInline(t){ return rtEsc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>'); }
+function rtTitle(desc){ const l = String(desc||'').split('\n').find(x=>x.trim()) || ''; return rtInline(l.replace(/^\s*(?:[•\-–*]|\d+[.)])\s+/,'')); }
+function rtBody(desc){ const lines = String(desc||'').split('\n'); const i = lines.findIndex(x=>x.trim()); return i<0 ? '' : lines.slice(i+1).join('\n').trim(); }
+function rtFormat(text){
+  const lines = String(text||'').split('\n'); let html = '', mode = null;
+  const close = ()=>{ if(mode){ html += '</'+mode+'>'; mode = null; } };
+  lines.forEach(l=>{
+    let m;
+    if((m = l.match(/^\s*[•\-–*]\s+(.*)$/))){ if(mode!=='ul'){ close(); html+='<ul>'; mode='ul'; } html += '<li>'+rtInline(m[1])+'</li>'; }
+    else if((m = l.match(/^\s*\d+[.)]\s+(.*)$/))){ if(mode!=='ol'){ close(); html+='<ol>'; mode='ol'; } html += '<li>'+rtInline(m[1])+'</li>'; }
+    else if(!l.trim()){ close(); }
+    else { close(); html += '<p>'+rtInline(l)+'</p>'; }
+  });
+  close(); return html;
+}
+function rtLineBounds(ta){
+  const v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
+  const start = v.lastIndexOf('\n', a-1) + 1;
+  let end = v.indexOf('\n', b); if(end<0) end = v.length;
+  return {start, end};
+}
+function rtList(id, prefix){
+  const ta = document.getElementById(id); ta.focus();
+  const {start, end} = rtLineBounds(ta);
+  const block = ta.value.slice(start, end).split('\n');
+  const re = /^\s*(?:[•\-–*]|\d+[.)])\s+/;
+  const allHave = block.some(l=>l.trim()) && block.every(l=>!l.trim() || (prefix==='1. ' ? /^\s*\d+[.)]\s+/.test(l) : l.startsWith(prefix)));
+  let n = 0;
+  const out = block.map(l=>{
+    if(!l.trim()) return l;
+    const bare = l.replace(re,'');
+    if(allHave) return bare;
+    n++; return (prefix==='1. ' ? n+'. ' : prefix) + bare;
+  }).join('\n');
+  const finalText = (block.length===1 && !block[0].trim() && !allHave) ? (prefix==='1. '?'1. ':prefix) : out;
+  ta.setRangeText(finalText, start, end, 'end');
+  ta.dispatchEvent(new Event('input'));
+}
+function rtBold(id){
+  const ta = document.getElementById(id); ta.focus();
+  const a = ta.selectionStart, b = ta.selectionEnd, sel = ta.value.slice(a,b);
+  if(sel){ ta.setRangeText('**'+sel+'**', a, b, 'end'); }
+  else { ta.setRangeText('****', a, b, 'end'); ta.selectionStart = ta.selectionEnd = a+2; }
+}
+function rtKeydown(e){
+  if(e.key!=='Enter' || e.shiftKey || e.isComposing) return;
+  const ta = e.target, v = ta.value, pos = ta.selectionStart;
+  if(pos!==ta.selectionEnd) return;
+  const start = v.lastIndexOf('\n', pos-1) + 1;
+  const line = v.slice(start, pos);
+  let m = line.match(/^(\s*)([•\-–*])\s+(.*)$/), next = null;
+  if(m) next = m[1]+m[2]+' ';
+  else if((m = line.match(/^(\s*)(\d+)([.)])\s+(.*)$/))) next = m[1]+(Number(m[2])+1)+m[3]+' ';
+  if(!next) return;
+  e.preventDefault();
+  const content = m[m.length-1];
+  if(!content.trim()){ ta.setRangeText('', start, pos, 'end'); return; }  // puce vide = fin de liste
+  ta.setRangeText('\n'+next, pos, pos, 'end');
+}
+(function(){ const go=()=>{ const t=document.getElementById('entDesc'); if(t && !t._rt){ t._rt=1; t.addEventListener('keydown', rtKeydown); } }; go(); document.addEventListener('DOMContentLoaded', go); })();
+
 // ---- ENTRETIEN ----
 function openEntretienModal(eqId, entId){
   document.getElementById('entEquipId').value = eqId;
   document.getElementById('entId').value = entId||'';
   const eq = state.equipements.find(e=>e.id===eqId);
   const ent = entId? eq.entretiens.find(x=>x.id===entId) : null;
-  document.getElementById('entDesc').value = ent?.desc||'';
+  document.getElementById('entDesc').value = ent ? [ent.desc||'', ent.notes||''].filter(Boolean).join('\n\n') : '';
   document.getElementById('entDerniere').value = ent?.derniere||'';
   document.getElementById('entPerVal').value = ent?.perVal||6;
   document.getElementById('entPerUnit').value = ent?.perUnit||'mois';
-  document.getElementById('entNotes').value = ent?.notes||'';
   document.getElementById('ovEntretien').classList.add('open');
 }
 function saveEntretien(){
   const eqId = document.getElementById('entEquipId').value;
   const entId = document.getElementById('entId').value;
   const eq = state.equipements.find(e=>e.id===eqId);
-  const desc = document.getElementById('entDesc').value.trim();
-  if(!desc){ alert('La description est requise'); return; }
+  const desc = document.getElementById('entDesc').value.replace(/\s+$/,'').replace(/^\s*\n/,'');
+  if(!desc.trim()){ alert('La description est requise'); return; }
   const data = {
     desc, derniere:document.getElementById('entDerniere').value,
     perVal:Number(document.getElementById('entPerVal').value)||6,
-    perUnit:document.getElementById('entPerUnit').value,
-    notes:document.getElementById('entNotes').value.trim()
+    perUnit:document.getElementById('entPerUnit').value
   };
-  if(entId) Object.assign(eq.entretiens.find(x=>x.id===entId), data);
+  if(entId){ const e0 = eq.entretiens.find(x=>x.id===entId); Object.assign(e0, data); delete e0.notes; }
   else { eq.entretiens = eq.entretiens||[]; eq.entretiens.push({id:uid(), ...data}); }
   save(); closeModal('ovEntretien'); renderEquip(); renderEcheances();
 }
