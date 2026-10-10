@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kalin-cache-v4';
+const CACHE_NAME = 'kalin-cache-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -42,7 +42,7 @@ self.addEventListener('fetch', (event) => {
     // Page HTML : toujours essayer le réseau en premier (pour avoir les mises à jour),
     // et retomber sur le cache seulement si hors-ligne.
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-cache' })
         .then((response) => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
