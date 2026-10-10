@@ -114,6 +114,13 @@ textarea{resize:vertical; min-height:50px;}
 .top-actions{display:flex; gap:8px; margin-bottom:12px;}
 .top-actions button{flex:1;}
 a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
+.notice-box{border:1px dashed var(--border); border-radius:11px; padding:10px; margin-top:4px;}
+.notice-file{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:0.85rem; padding:6px 0;}
+.notice-file .nf-name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;}
+.notice-btns{display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 6px;}
+.notice-btns button{font-size:0.8rem; padding:6px 10px;}
+#ovNoticeView .modal{max-width:900px; width:96vw; height:90vh; display:flex; flex-direction:column;}
+#ovNoticeView iframe,#ovNoticeView img{flex:1; width:100%; border:1px solid var(--border); border-radius:8px; background:#fff; object-fit:contain; min-height:0;}
 .overflow-x{overflow-x:auto;}
 .liste-table{width:100%; border-collapse:collapse; font-size:0.82rem;}
 .liste-table th,.liste-table td{border-bottom:1px solid var(--border); padding:7px 8px; text-align:left; white-space:nowrap;}
@@ -258,10 +265,16 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
         </label>
       </div>
     </div>
-    <label>Lien notice (URL)</label><input id="eqNotice" placeholder="https://…">
+    <label>Notices (PDF ou photo, stockées dans l'appli)</label>
+    <div class="notice-box">
+      <div id="eqNoticeList"></div>
+      <button type="button" class="ghost small" onclick="document.getElementById('eqNoticeFile').click()">📎 Joindre depuis Fichiers</button>
+      <input type="file" id="eqNoticeFile" accept="application/pdf,.pdf,image/*" multiple style="display:none" onchange="addNoticeFiles(event)">
+    </div>
+    <label>Lien notice web (facultatif)</label><input id="eqNotice" placeholder="https://…">
     <label>Notes</label><textarea id="eqNotes"></textarea>
     <div class="modal-actions">
-      <button class="ghost" onclick="closeModal('ovEquip')">Annuler</button>
+      <button class="ghost" onclick="cancelEquipModal()">Annuler</button>
       <button onclick="saveEquip()">Enregistrer</button>
     </div>
   </div>
@@ -453,6 +466,17 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
 <div id="printListArea"></div>
 
 <!-- MODAL PARAMETRES / SAUVEGARDE -->
+<div class="overlay" id="ovNoticeView">
+  <div class="modal">
+    <h2 id="noticeViewTitle">Notice</h2>
+    <div id="noticeViewBody" style="flex:1; display:flex; min-height:0;"></div>
+    <div class="modal-actions">
+      <button class="ghost" id="noticeViewShare" onclick="shareCurrentNotice()">Partager / Ouvrir dans…</button>
+      <button onclick="closeNoticeView()">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="ovParams">
   <div class="modal">
     <h2>Sauvegarde des données</h2>
@@ -492,6 +516,108 @@ function save(){
   catch(e){ console.error('save error', e); }
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+/* ===== Notices stockées hors ligne (IndexedDB) ===== */
+let _ndb=null;
+function noticeDB(){
+  if(_ndb) return _ndb;
+  _ndb = new Promise((res,rej)=>{
+    try{
+      const r = indexedDB.open('kalin_notices',1);
+      r.onupgradeneeded = ()=>{ r.result.createObjectStore('files'); };
+      r.onsuccess = ()=>res(r.result);
+      r.onerror = ()=>rej(r.error);
+    }catch(e){ rej(e); }
+  });
+  return _ndb;
+}
+async function noticePut(id, blob){
+  const db = await noticeDB();
+  return new Promise((res,rej)=>{ const tx=db.transaction('files','readwrite'); tx.objectStore('files').put(blob,id); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); });
+}
+async function noticeGet(id){
+  const db = await noticeDB();
+  return new Promise((res,rej)=>{ const r=db.transaction('files').objectStore('files').get(id); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+}
+async function noticeDel(id){
+  try{ const db = await noticeDB();
+    return new Promise(res=>{ const tx=db.transaction('files','readwrite'); tx.objectStore('files').delete(id); tx.oncomplete=()=>res(); tx.onerror=()=>res(); });
+  }catch(e){}
+}
+try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+
+let _formNotices = [];      // notices de la fiche en cours d'édition
+let _formNoticesRemoved = [];
+function fmtSize(n){ return n>1048576 ? (n/1048576).toFixed(1)+' Mo' : Math.max(1,Math.round(n/1024))+' Ko'; }
+function cancelEquipModal(){
+  _formNotices.filter(n=>n._new).forEach(n=>noticeDel(n.id));
+  _formNotices=[]; _formNoticesRemoved=[];
+  closeModal('ovEquip');
+}
+function renderFormNotices(){
+  const el = document.getElementById('eqNoticeList');
+  el.innerHTML = _formNotices.map((n,i)=>`<div class="notice-file">
+      <span class="nf-name">📄 ${escNotice(n.nom)} <span style="color:var(--sub);font-size:.75rem">${fmtSize(n.taille||0)}</span></span>
+      <button type="button" class="icon" onclick="removeFormNotice(${i})">🗑</button>
+    </div>`).join('') || '<div style="font-size:.8rem;color:var(--sub);margin-bottom:6px">Aucune notice jointe</div>';
+}
+function escNotice(t){ return String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function addNoticeFiles(ev){
+  const files = Array.from(ev.target.files||[]);
+  for(const f of files){
+    const id = 'n_'+uid();
+    try{
+      await noticePut(id, f);
+      _formNotices.push({id, nom:f.name, type:f.type||'application/pdf', taille:f.size, _new:true});
+    }catch(e){ alert("Impossible d'enregistrer « "+f.name+" » : espace de stockage insuffisant ?"); }
+  }
+  ev.target.value='';
+  renderFormNotices();
+}
+function removeFormNotice(i){
+  const n = _formNotices.splice(i,1)[0];
+  if(n._new) noticeDel(n.id); else _formNoticesRemoved.push(n.id);
+  renderFormNotices();
+}
+
+let _curNotice = null; // {blob,url,nom}
+async function openNotice(eqId, nId){
+  const eq = state.equipements.find(e=>e.id===eqId);
+  const meta = (eq?.notices||[]).find(n=>n.id===nId);
+  let blob;
+  try{ blob = await noticeGet(nId); }catch(e){}
+  if(!blob){ alert("Cette notice n'est plus présente sur cet appareil. Joins-la à nouveau depuis Fichiers."); return; }
+  closeNoticeView();
+  const url = URL.createObjectURL(blob);
+  _curNotice = {blob, url, nom: meta?.nom || 'notice.pdf'};
+  document.getElementById('noticeViewTitle').textContent = _curNotice.nom;
+  const body = document.getElementById('noticeViewBody');
+  body.innerHTML = (blob.type||'').startsWith('image/') ? `<img src="${url}" alt="">` : `<iframe src="${url}"></iframe>`;
+  document.getElementById('noticeViewShare').style.display = (_dl || navigator.share) ? '' : 'none';
+  document.getElementById('ovNoticeView').classList.add('open');
+}
+function closeNoticeView(){
+  document.getElementById('ovNoticeView').classList.remove('open');
+  document.getElementById('noticeViewBody').innerHTML='';
+  if(_curNotice){ setTimeout(()=>URL.revokeObjectURL(_curNotice.url), 60000); _curNotice=null; }
+}
+let _dl = null;
+try{ window.claude && window.claude.use("downloads").then(d=>{ _dl=d; }); }catch(e){}
+async function shareCurrentNotice(){
+  if(!_curNotice) return;
+  let nom = _curNotice.nom;
+  if(!/\.(pdf|png|jpe?g|gif|webp)$/i.test(nom)){
+    const t=_curNotice.blob.type||'';
+    nom += t.includes('png')?'.png':t.includes('jpeg')?'.jpg':'.pdf';
+  }
+  if(_dl){
+    try{ await _dl.save({filename:nom, data:_curNotice.blob}); }
+    catch(e){ if(e && e.code!=='declined') toast("Partage impossible ici"); }
+    return;
+  }
+  try{ await navigator.share({files:[new File([_curNotice.blob], nom, {type:_curNotice.blob.type||'application/pdf'})], title:nom}); }
+  catch(e){ if(e && e.name!=='AbortError') toast("Partage impossible ici"); }
+}
 let _toastTimer=null;
 function toast(msg){
   const el = document.getElementById('toast');
@@ -1002,6 +1128,9 @@ function openEquipModal(id){
   document.getElementById('eqDateAchatInconnue').checked = inconnue;
   toggleEqDateInconnue();
   document.getElementById('eqNotice').value = eq?.notice||'';
+  _formNotices = (eq?.notices||[]).map(n=>({...n}));
+  _formNoticesRemoved = [];
+  renderFormNotices();
   document.getElementById('eqNotes').value = eq?.notes||'';
   document.getElementById('ovEquip').classList.add('open');
 }
@@ -1029,6 +1158,7 @@ function saveEquip(){
     serie:document.getElementById('eqSerie').value.trim(),
     dateAchat: dateInconnue ? 'inconnue' : document.getElementById('eqDateAchat').value,
     notice:document.getElementById('eqNotice').value.trim(),
+    notices:_formNotices.map(({_new,...n})=>n),
     notes:document.getElementById('eqNotes').value.trim()
   };
   if(id){
@@ -1036,10 +1166,13 @@ function saveEquip(){
   } else {
     state.equipements.push({id:uid(), ...data, entretiens:[], achats:[], open:true});
   }
+  _formNoticesRemoved.forEach(noticeDel); _formNoticesRemoved=[];
+  _formNotices.forEach(n=>{ delete n._new; });
   save(); closeModal('ovEquip'); renderEquip(); renderDepEquipOptions();
 }
 function deleteEquip(id){
   if(!confirm('Supprimer cet équipement et tout son historique ?')) return;
+  (state.equipements.find(e=>e.id===id)?.notices||[]).forEach(n=>noticeDel(n.id));
   state.equipements = state.equipements.filter(e=>e.id!==id);
   save(); renderEquip(); renderDepEquipOptions(); renderEcheances(); renderDep();
 }
@@ -1122,7 +1255,8 @@ function renderEquipCard(eq){
       <div class="eq-body ${eq.open?'open':''}">
         <div class="meta">
           ${eq.dateAchat==='inconnue'? "Date d'achat inconnue<br>" : (eq.dateAchat? "Acheté le "+fmtDate(eq.dateAchat)+"<br>":"")}
-          ${eq.notice? '<a class="notice-link" href="'+eq.notice+'" target="_blank" rel="noopener">📄 Voir la notice</a><br>':''}
+          ${(eq.notices||[]).length? '<div class="notice-btns">'+eq.notices.map(n=>'<button class="small" onclick="event.stopPropagation();openNotice(\''+eq.id+'\',\''+n.id+'\')">📄 '+escNotice(n.nom.replace(/\.pdf$/i,''))+'</button>').join('')+'</div>':''}
+          ${eq.notice? '<a class="notice-link" href="'+eq.notice+'" target="_blank" rel="noopener">🌐 Notice en ligne</a><br>':''}
           ${eq.notes? eq.notes:''}
         </div>
         <div class="row"><button class="ghost small" onclick="openEquipModal('${eq.id}')">Modifier la fiche</button><button class="ghost small" onclick="deleteEquip('${eq.id}')">Supprimer</button></div>
