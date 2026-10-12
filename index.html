@@ -447,8 +447,8 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
     <label>Catégorie</label>
     <input type="hidden" id="schemaCat">
     <div class="cat-picker" id="schemaCatPicker"></div>
-    <label>Image (photo ou capture du schéma)</label>
-    <input type="file" id="schemaFile" accept="image/*" onchange="handleSchemaFile(event)">
+    <label>Fichier du schéma (photo, image ou PDF)</label>
+    <input type="file" id="schemaFile" accept="image/*,application/pdf,.pdf" onchange="handleSchemaFile(event)">
     <div id="schemaPreviewWrap" style="margin-top:8px"></div>
     <label>Notes</label><textarea id="schemaNotes"></textarea>
     <div class="modal-actions">
@@ -475,7 +475,7 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
     </div>
   </div>
 </div>
-<input type="file" id="schemaReplaceFile" accept="image/*" style="display:none" onchange="handleSchemaReplace(event)">
+<input type="file" id="schemaReplaceFile" accept="image/*,application/pdf,.pdf" style="display:none" onchange="handleSchemaReplace(event)">
 
 <!-- MODAL CONFIRMATION ACHAT -->
 <div class="overlay" id="ovConfirmAchat">
@@ -964,12 +964,54 @@ function resizeImageFile(file, maxDim, cb){
   };
   reader.readAsDataURL(file);
 }
-function handleSchemaFile(event){
+let _pendingSchemaPdf = null; // {id, nom}
+function isPdfFile(f){ return (f.type||'')==='application/pdf' || /\.pdf$/i.test(f.name||''); }
+// Miniature de la 1re page d'un PDF (null si le lecteur PDF n'est pas disponible)
+async function pdfThumb(blob, maxDim){
+  try{
+    const lib = await loadPdfLib();
+    const doc = await lib.getDocument({data: new Uint8Array(await blob.arrayBuffer())}).promise;
+    const page = await doc.getPage(1);
+    const v0 = page.getViewport({scale:1});
+    const sc = Math.min(maxDim/v0.width, maxDim/v0.height, 2);
+    const v = page.getViewport({scale:sc});
+    const c = document.createElement('canvas');
+    c.width = Math.round(v.width); c.height = Math.round(v.height);
+    const ctx = c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+    await page.render({canvasContext:ctx, viewport:v}).promise;
+    const url = c.toDataURL('image/jpeg', 0.78);
+    try{ doc.destroy(); }catch(e){}
+    return url;
+  }catch(e){ return null; }
+}
+// Enregistre un PDF de schéma sur l'appareil ; renvoie {pdf:{id,nom}, image}
+async function storeSchemaPdf(file){
+  const id = 's_'+uid();
+  await noticePut(id, file);
+  const image = await pdfThumb(file, 900);
+  return {pdf:{id, nom:file.name||'schema.pdf'}, image};
+}
+function schemaPdfPreview(nom, image){
+  return (image? '<img src="'+image+'" style="max-width:100%; border-radius:10px; display:block;">' : '')
+    + '<div style="font-size:.85rem; margin-top:6px">📄 '+escNotice(nom)+'</div>';
+}
+async function handleSchemaFile(event){
   const file = event.target.files[0];
   if(!file) return;
+  const wrap = document.getElementById('schemaPreviewWrap');
+  if(_pendingSchemaPdf){ noticeDel(_pendingSchemaPdf.id); _pendingSchemaPdf = null; }
+  if(isPdfFile(file)){
+    wrap.innerHTML = '<div style="font-size:.85rem;color:var(--sub)">Chargement du PDF…</div>';
+    try{
+      const r = await storeSchemaPdf(file);
+      _pendingSchemaPdf = r.pdf; _pendingSchemaImage = r.image;
+      wrap.innerHTML = schemaPdfPreview(r.pdf.nom, r.image);
+    }catch(e){ wrap.innerHTML=''; alert("Impossible d'enregistrer ce PDF : espace de stockage insuffisant ?"); }
+    return;
+  }
   resizeImageFile(file, 1600, (dataUrl)=>{
     _pendingSchemaImage = dataUrl;
-    document.getElementById('schemaPreviewWrap').innerHTML = '<img src="'+dataUrl+'" style="max-width:100%; border-radius:10px; display:block;">';
+    wrap.innerHTML = '<img src="'+dataUrl+'" style="max-width:100%; border-radius:10px; display:block;">';
   });
 }
 const SCHEMA_CATS_FIXES = ['Électrique','Hydraulique','Plomberie','Gréement','Moteur'];
@@ -1012,6 +1054,7 @@ function openSchemaModal(id){
   document.getElementById('schemaModalTitle').textContent = id? 'Modifier le schéma' : 'Nouveau schéma';
   document.getElementById('schemaId').value = id||'';
   document.getElementById('schemaFile').value = '';
+  if(_pendingSchemaPdf){ noticeDel(_pendingSchemaPdf.id); _pendingSchemaPdf = null; }
   _pendingSchemaImage = null;
   const s = id? state.schemas.find(x=>x.id===id) : null;
   document.getElementById('schemaTitre').value = s?.titre||'';
@@ -1021,7 +1064,7 @@ function openSchemaModal(id){
   }
   populateSchemaCatOptions(cat);
   document.getElementById('schemaNotes').value = s?.notes||'';
-  document.getElementById('schemaPreviewWrap').innerHTML = s?.image? '<img src="'+s.image+'" style="max-width:100%; border-radius:10px; display:block;">' : '';
+  document.getElementById('schemaPreviewWrap').innerHTML = s?.pdf? schemaPdfPreview(s.pdf.nom, s.image) : s?.image? '<img src="'+s.image+'" style="max-width:100%; border-radius:10px; display:block;">' : '';
   document.getElementById('ovSchema').classList.add('open');
 }
 function saveSchema(){
@@ -1031,17 +1074,23 @@ function saveSchema(){
   const existant = id? state.schemas.find(x=>x.id===id) : null;
   const categorie = document.getElementById('schemaCat').value;
   if(!categorie){ alert('Merci de choisir une catégorie.'); return; }
+  const nouveauFichier = !!_pendingSchemaImage || !!_pendingSchemaPdf;
   const data = {
     titre, categorie,
     notes:document.getElementById('schemaNotes').value.trim(),
-    image: _pendingSchemaImage || existant?.image || null
+    image: nouveauFichier ? _pendingSchemaImage : (existant?.image || null),
+    pdf: nouveauFichier ? (_pendingSchemaPdf || null) : (existant?.pdf || null)
   };
+  if(nouveauFichier && existant?.pdf && existant.pdf.id !== data.pdf?.id) noticeDel(existant.pdf.id);
+  _pendingSchemaPdf = null; _pendingSchemaImage = null;
   if(id) Object.assign(existant, data);
   else state.schemas.push({id:uid(), annotations:null, ...data});
   save(); closeModal('ovSchema'); renderSchemas();
 }
 function deleteSchema(id){
   if(!confirm('Supprimer ce schéma et ses annotations ?')) return;
+  const s = state.schemas.find(x=>x.id===id);
+  if(s?.pdf) noticeDel(s.pdf.id);
   state.schemas = state.schemas.filter(x=>x.id!==id);
   save(); renderSchemas();
 }
@@ -1063,9 +1112,9 @@ function renderSchemas(){
       ${g.items.map(s=>`
         <div class="schema-column-item">
           <div class="schema-card" onclick="openSchemaEditor('${s.id}')">
-            ${s.image? '<img class="schema-thumb" src="'+s.image+'">' : '<div class="schema-thumb-empty">🗂️</div>'}
+            ${s.image? '<img class="schema-thumb" src="'+s.image+'">' : '<div class="schema-thumb-empty">'+(s.pdf?'📄':'🗂️')+'</div>'}
             <div class="schema-info">
-              <div class="t">${s.titre}</div>
+              <div class="t">${s.pdf?'📄 ':''}${s.titre}</div>
             </div>
           </div>
           <div class="schema-actions">
@@ -1087,6 +1136,7 @@ function dataUrlToBlob(dataUrl){
 function openSchemaEditor(id){
   const s = state.schemas.find(x=>x.id===id);
   if(!s) return;
+  if(s.pdf){ openSchemaPdf(s); return; }
   _schemaCurrentId = id;
   document.getElementById('schemaEditorTitle').textContent = s.titre;
   const img = document.getElementById('schemaViewerImg');
@@ -1098,6 +1148,20 @@ function openSchemaEditor(id){
     img.style.display = 'none';
   }
   document.getElementById('ovSchemaEditor').classList.add('open');
+}
+async function openSchemaPdf(s){
+  let blob;
+  try{ blob = await noticeGet(s.pdf.id); }catch(e){}
+  if(!blob){ alert("Le PDF de ce schéma n'est plus présent sur cet appareil. Modifie le schéma (✏️) et choisis à nouveau le fichier."); return; }
+  closeNoticeView();
+  const url = URL.createObjectURL(blob);
+  _curNotice = {blob, url, nom: s.pdf.nom || ((s.titre||'schema')+'.pdf')};
+  document.getElementById('noticeViewTitle').textContent = s.titre || _curNotice.nom;
+  document.getElementById('pdfTools').style.display = 'none';
+  document.getElementById('noticeViewBody').innerHTML = '<div class="pdf-scroll" id="pdfScroll"><div class="pdf-msg">Ouverture du schéma…</div></div>';
+  showPdf(blob);
+  document.getElementById('noticeViewShare').style.display = (_dl || navigator.share) ? '' : 'none';
+  document.getElementById('ovNoticeView').classList.add('open');
 }
 function closeSchemaEditor(){
   document.getElementById('ovSchemaEditor').classList.remove('open');
@@ -1135,13 +1199,26 @@ function replaceSchemaImage(){
   if(!_schemaCurrentId) return;
   document.getElementById('schemaReplaceFile').click();
 }
-function handleSchemaReplace(event){
+async function handleSchemaReplace(event){
   const file = event.target.files[0];
   if(!file || !_schemaCurrentId) return;
+  if(isPdfFile(file)){
+    const s = state.schemas.find(x=>x.id===_schemaCurrentId);
+    event.target.value = '';
+    if(!s) return;
+    try{
+      const r = await storeSchemaPdf(file);
+      if(s.pdf) noticeDel(s.pdf.id);
+      s.pdf = r.pdf; s.image = r.image;
+      save(); renderSchemas(); closeSchemaEditor(); openSchemaPdf(s);
+    }catch(e){ alert("Impossible d'enregistrer ce PDF : espace de stockage insuffisant ?"); }
+    return;
+  }
   resizeImageFile(file, 1600, (dataUrl)=>{
     const s = state.schemas.find(x=>x.id===_schemaCurrentId);
     if(!s) return;
     s.image = dataUrl;
+    if(s.pdf){ noticeDel(s.pdf.id); s.pdf = null; }
     save();
     document.getElementById('schemaViewerImg').src = dataUrl;
     renderSchemas();
