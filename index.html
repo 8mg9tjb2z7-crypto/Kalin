@@ -610,6 +610,17 @@ main:has(#sec-equip.active){max-width:none;}
   </div>
 </div>
 
+<div class="overlay" id="ovRelink">
+  <div class="modal">
+    <h2>Fichier introuvable</h2>
+    <p style="font-size:.95rem;line-height:1.5;margin-top:0">« <b id="relinkName"></b> » n'est plus présent sur cet appareil (par exemple après une réinstallation de l'app).<br>Choisissez à nouveau la photo ou la notice : elle reprendra sa place sur cette fiche.</p>
+    <label style="display:block;text-align:center;cursor:pointer;margin:10px 0 14px;padding:14px;border-radius:12px;background:var(--accent,#0f6e8c);color:#fff;font-weight:700;font-size:1.05rem">📂 Joindre à nouveau
+      <input type="file" id="relinkFile" accept="image/*,application/pdf,.pdf" style="display:none" onchange="relinkNotice(event)">
+    </label>
+    <div class="modal-actions"><button class="ghost" onclick="closeModal('ovRelink')">Fermer</button></div>
+  </div>
+</div>
+
 <script>
 let state = {equipements:[], depenses:[], travaux:[], schemas:[], customEqCats:[], customSchemaCats:[], customDepCats:[]};
 
@@ -727,7 +738,7 @@ async function openNotice(eqId, nId){
   const meta = (eq?.notices||[]).find(n=>n.id===nId);
   let blob;
   try{ blob = await noticeGet(nId); }catch(e){}
-  if(!blob){ alert("Cette notice n'est plus présente sur cet appareil. Joins-la à nouveau depuis Fichiers."); return; }
+  if(!blob){ askRelink(nId, meta, eq); return; }
   closeNoticeView();
   const url = URL.createObjectURL(blob);
   _curNotice = {blob, url, nom: meta?.nom || 'notice.pdf'};
@@ -739,6 +750,24 @@ async function openNotice(eqId, nId){
   else { body.innerHTML = '<div class="pdf-scroll" id="pdfScroll"><div class="pdf-msg">Ouverture de la notice…</div></div>'; showPdf(blob); }
   document.getElementById('noticeViewShare').style.display = (_dl || navigator.share) ? '' : 'none';
   document.getElementById('ovNoticeView').classList.add('open');
+}
+let _relink = null;
+function askRelink(nId, meta, owner){
+  _relink = {nId, meta, owner};
+  document.getElementById('relinkName').textContent = meta?.nom || 'fichier';
+  document.getElementById('relinkFile').value = '';
+  document.getElementById('ovRelink').classList.add('open');
+}
+async function relinkNotice(ev){
+  const f = ev.target.files && ev.target.files[0];
+  if(!f || !_relink) return;
+  try{ await noticePut(_relink.nId, f); }
+  catch(e){ alert("Impossible d'enregistrer ce fichier : espace de stockage insuffisant ?"); return; }
+  forgetThumb(_relink.nId);
+  if(_relink.meta){ _relink.meta.nom = f.name; _relink.meta.type = f.type || _relink.meta.type; _relink.meta.taille = f.size; save(); }
+  closeModal('ovRelink'); _relink = null;
+  renderEquip(); try{ renderSchemas(); }catch(e){}
+  toast('Fichier rattaché ✓');
 }
 /* ===== Affichage PDF toutes pages (pdf.js) ===== */
 const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
@@ -1212,7 +1241,7 @@ function openSchemaEditor(id){
 async function openSchemaPdf(s){
   let blob;
   try{ blob = await noticeGet(s.pdf.id); }catch(e){}
-  if(!blob){ alert("Le PDF de ce schéma n'est plus présent sur cet appareil. Modifie le schéma (✏️) et choisis à nouveau le fichier."); return; }
+  if(!blob){ askRelink(s.pdf.id, s.pdf, s); return; }
   closeNoticeView();
   const url = URL.createObjectURL(blob);
   _curNotice = {blob, url, nom: s.pdf.nom || ((s.titre||'schema')+'.pdf')};
@@ -1402,22 +1431,38 @@ function openParamsModal(){
   _paletteOpen = null; renderColorPickers();
   document.getElementById('ovParams').classList.add('open');
 }
-function exportData(){
+function allNoticeIds(){
+  const ids = [];
+  state.equipements.forEach(eq=>(eq.notices||[]).forEach(n=>ids.push(n.id)));
+  state.schemas.forEach(sc=>{ if(sc.pdf && sc.pdf.id) ids.push(sc.pdf.id); });
+  return ids;
+}
+function blobToDataURL(b){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(b); }); }
+async function dataURLToBlob(d){ return (await fetch(d)).blob(); }
+async function exportData(){
+  const msg = document.getElementById('importMsg');
   try{
-    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const today = new Date().toISOString().slice(0,10);
-    a.href = url;
-    a.download = 'kalin-sauvegarde-'+today+'.json';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url), 2000);
-    document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Export lancé — enregistrez le fichier dans Fichiers ou iCloud.</span>';
+    msg.innerHTML = '<span style="color:var(--sub)">Préparation de la sauvegarde (photos et notices comprises)…</span>';
+    const fichiers = {}; let manquants = 0;
+    for(const id of allNoticeIds()){
+      try{ const b = await noticeGet(id); if(b) fichiers[id] = {type:b.type||'', data: await blobToDataURL(b)}; else manquants++; }catch(e){ manquants++; }
+    }
+    const blob = new Blob([JSON.stringify(Object.assign({}, state, {_fichiers:fichiers}))], {type:'application/json'});
+    const nom = 'kalin-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json';
+    let ok = false;
+    if(_dl){ try{ await _dl.save({filename:nom, data:blob}); ok = true; }catch(e){} }
+    if(!ok){
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = nom;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    }
+    const n = Object.keys(fichiers).length;
+    msg.innerHTML = '<span style="color:var(--ok)">Sauvegarde complète lancée ('+n+' photo'+(n>1?'s':'')+'/notice'+(n>1?'s':'')+' incluse'+(n>1?'s':'')+', '+fmtSize(blob.size)+') — enregistrez-la dans Fichiers ou iCloud.</span>'
+      + (manquants? '<br><span style="color:var(--danger)">'+manquants+' fichier'+(manquants>1?'s':'')+' déjà absent'+(manquants>1?'s':'')+' de l\'appareil, non inclus.</span>':'');
   }catch(e){
     console.error('export error', e);
-    document.getElementById('importMsg').innerHTML = '<span style="color:var(--danger)">Erreur pendant l\'export.</span>';
+    msg.innerHTML = '<span style="color:var(--danger)">Erreur pendant l\'export.</span>';
   }
 }
 function importData(event){
@@ -1431,6 +1476,7 @@ function importData(event){
         throw new Error('format invalide');
       }
       if(!confirm('Importer ce fichier va REMPLACER toutes les données actuellement enregistrées sur cet appareil. Continuer ?')) return;
+      const fichiers = data._fichiers || {}; delete data._fichiers;
       state = data;
       if(!Array.isArray(state.travaux)) state.travaux = [];
       if(!Array.isArray(state.schemas)) state.schemas = [];
@@ -1441,7 +1487,14 @@ function importData(event){
       save();
       populateEqCatOptions(); populateSchemaCatOptions(); populateDepCatOptions();
       renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos(); applyColors();
-      document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi.</span>';
+      const ids = Object.keys(fichiers);
+      document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi.'+(ids.length? ' Restauration des photos et notices…':'')+'</span>';
+      (async ()=>{
+        let ok = 0;
+        for(const id of ids){ try{ await noticePut(id, await dataURLToBlob(fichiers[id].data)); forgetThumb(id); ok++; }catch(e){} }
+        if(ids.length){ renderEquip(); try{ renderSchemas(); }catch(e){}
+          document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi : '+ok+' photo(s)/notice(s) restaurée(s).</span>'; }
+      })();
     }catch(err){
       console.error('import error', err);
       document.getElementById('importMsg').innerHTML = '<span style="color:var(--danger)">Fichier invalide, import annulé.</span>';
