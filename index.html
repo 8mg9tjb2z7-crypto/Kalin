@@ -226,7 +226,7 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
 .cat-chip.perso.active{background:var(--accent); color:#fff; border-style:solid;}
 
 /* ===== Page d'accueil pleine largeur + Pense-bête ===== */
-main:has(#sec-equip.active){max-width:none;}
+main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
 .memo{
   position:relative; margin:2px 0 14px; padding:12px 16px 10px 46px;
   background-color:var(--memo-bg,#fff6b8); color:#3b3410; border-radius:4px 4px 14px 4px;
@@ -260,6 +260,22 @@ main:has(#sec-equip.active){max-width:none;}
 .memo-add input::placeholder{color:#a8964f; font-style:italic;}
 .memo-add span{color:#8a6a10; font-weight:800; width:20px; text-align:center;}
 @media print{ .memo{display:none;} }
+/* ===== Factures ===== */
+.fact-search{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:14px;}
+.fact-search-grid{display:grid; grid-template-columns:2fr 1.4fr 1fr 1fr 1.1fr 1.1fr; gap:10px; align-items:end;}
+.fact-search-grid label{margin:0 0 4px;}
+.fact-search-grid input,.fact-search-grid select{margin:0;}
+@media (max-width:820px){ .fact-search-grid{grid-template-columns:1fr 1fr;} .fact-search-grid .fs-wide{grid-column:1 / -1;} }
+.fact-result{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:10px; font-size:.88rem; color:var(--sub); flex-wrap:wrap;}
+.fact-result b{color:var(--text); font-size:1rem;}
+.fact-card{padding:12px 14px;}
+.fact-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+.fact-four{font-weight:700; font-size:1rem;}
+.fact-obj{font-size:.86rem; margin-top:2px;}
+.fact-amt{font-weight:800; font-size:1.08rem; white-space:nowrap; color:var(--accent);}
+.fact-meta{font-size:.76rem; color:var(--sub); margin-top:4px;}
+.fact-actions{display:flex; justify-content:flex-end; gap:4px; margin-top:4px;}
+.eq-column-total{font-size:.78rem; color:var(--sub); font-weight:600; margin:-4px 0 8px;}
 </style>
 </head>
 <body>
@@ -276,6 +292,7 @@ main:has(#sec-equip.active){max-width:none;}
     <div class="tab" data-tab="echeances">Échéances</div>
     <div class="tab" data-tab="depenses">Dépenses</div>
     <div class="tab" data-tab="schemas">Schémas</div>
+    <div class="tab" data-tab="factures">Factures</div>
   </div>
 </header>
 
@@ -337,7 +354,56 @@ main:has(#sec-equip.active){max-width:none;}
     </div>
     <div id="schemaList"></div>
   </section>
+
+  <!-- FACTURES -->
+  <section class="section" id="sec-factures">
+    <button class="add-btn" onclick="openFactModal()">+ Ajouter une facture</button>
+    <div class="fact-search">
+      <div class="fact-search-grid">
+        <div class="fs-wide"><label>🔍 Rechercher</label><input id="fsTxt" type="search" placeholder="Fournisseur, objet, n° de facture…" oninput="renderFactures()"></div>
+        <div class="fs-wide"><label>Catégorie</label><select id="fsCat" onchange="renderFactures()"></select></div>
+        <div><label>Montant min (€)</label><input id="fsMin" type="text" inputmode="decimal" placeholder="0" oninput="renderFactures()"></div>
+        <div><label>Montant max (€)</label><input id="fsMax" type="text" inputmode="decimal" placeholder="∞" oninput="renderFactures()"></div>
+        <div><label>Du</label><input id="fsDu" type="date" onchange="renderFactures()"></div>
+        <div><label>Au</label><input id="fsAu" type="date" onchange="renderFactures()"></div>
+      </div>
+      <div class="fact-result"><span id="fsResult"></span><button class="ghost small" id="fsReset" onclick="resetFactSearch()" hidden>✕ Effacer la recherche</button></div>
+    </div>
+    <div id="factList"></div>
+  </section>
 </main>
+
+<!-- MODAL FACTURE -->
+<div class="overlay" id="ovFact">
+  <div class="modal">
+    <h2 id="factModalTitle">Nouvelle facture</h2>
+    <input type="hidden" id="factId">
+    <label>Fournisseur / magasin</label><input id="factFour" placeholder="Ex : Accastillage Diffusion">
+    <label>Objet</label><input id="factObj" placeholder="Ex : Pompe de cale Rule 1100">
+    <label>Catégorie</label>
+    <input type="hidden" id="factCat">
+    <div class="cat-picker" id="factCatPicker"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Date</label><input id="factDate" type="date"></div>
+      <div><label>Montant TTC (€)</label><input id="factMontant" type="text" inputmode="decimal" placeholder="0,00"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>N° de facture (facultatif)</label><input id="factNum"></div>
+      <div><label>Équipement concerné (facultatif)</label><select id="factEq"></select></div>
+    </div>
+    <label>Facture (photo ou PDF)</label>
+    <div class="notice-box">
+      <div id="factFileList"></div>
+      <button type="button" class="ghost small" onclick="document.getElementById('factFileInput').click()">📎 Joindre depuis Fichiers ou Photos</button>
+      <input type="file" id="factFileInput" accept="application/pdf,.pdf,image/*" multiple style="display:none" onchange="addNoticeFiles(event)">
+    </div>
+    <label>Notes</label><textarea id="factNotes"></textarea>
+    <div class="modal-actions">
+      <button class="ghost" onclick="cancelFactModal()">Annuler</button>
+      <button onclick="saveFact()">Enregistrer</button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL EQUIPEMENT -->
 <div class="overlay" id="ovEquip">
@@ -622,7 +688,7 @@ main:has(#sec-equip.active){max-width:none;}
 </div>
 
 <script>
-let state = {equipements:[], depenses:[], travaux:[], schemas:[], customEqCats:[], customSchemaCats:[], customDepCats:[]};
+let state = {equipements:[], depenses:[], travaux:[], schemas:[], factures:[], customEqCats:[], customSchemaCats:[], customDepCats:[]};
 
 function load(){
   try{
@@ -637,6 +703,7 @@ function load(){
   if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
   if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
   if(!Array.isArray(state.memos)) state.memos = [];
+  if(!Array.isArray(state.factures)) state.factures = [];
   state.travaux.forEach(t=>{ if(!Array.isArray(t.achats)) t.achats = []; });
   state.equipements.forEach(eq=>{ if(!Array.isArray(eq.achats)) eq.achats = []; if(!Array.isArray(eq.entretiens)) eq.entretiens = []; eq.open = false;
     eq.entretiens.forEach(en=>{ if(en.notes && String(en.notes).trim()){ en.desc = (en.desc||'') + '\n\n' + String(en.notes).trim(); } delete en.notes; });
@@ -681,6 +748,7 @@ window.addEventListener('load', ()=>{ setTimeout(()=>{ if(navigator.onLine) load
 
 let _formNotices = [];      // notices de la fiche en cours d'édition
 let _formNoticesRemoved = [];
+let _noticeListEl = 'eqNoticeList';
 function fmtSize(n){ return n>1048576 ? (n/1048576).toFixed(1)+' Mo' : Math.max(1,Math.round(n/1024))+' Ko'; }
 function cancelEquipModal(){
   _formNotices.filter(n=>n._new).forEach(n=>noticeDel(n.id));
@@ -701,7 +769,7 @@ async function hydrateThumbs(root){
 }
 function forgetThumb(id){ if(_thumbUrls[id]){ URL.revokeObjectURL(_thumbUrls[id]); delete _thumbUrls[id]; } }
 function renderFormNotices(){
-  const el = document.getElementById('eqNoticeList');
+  const el = document.getElementById(_noticeListEl);
   const imgs = _formNotices.map((n,i)=>({n,i})).filter(x=>isImgNotice(x.n));
   const docs = _formNotices.map((n,i)=>({n,i})).filter(x=>!isImgNotice(x.n));
   let html = '';
@@ -734,7 +802,7 @@ function removeFormNotice(i){
 
 let _curNotice = null; // {blob,url,nom}
 async function openNotice(eqId, nId){
-  const eq = state.equipements.find(e=>e.id===eqId);
+  const eq = state.equipements.find(e=>e.id===eqId) || (state.factures||[]).find(f=>f.id===eqId);
   const meta = (eq?.notices||[]).find(n=>n.id===nId);
   let blob;
   try{ blob = await noticeGet(nId); }catch(e){}
@@ -766,7 +834,7 @@ async function relinkNotice(ev){
   forgetThumb(_relink.nId);
   if(_relink.meta){ _relink.meta.nom = f.name; _relink.meta.type = f.type || _relink.meta.type; _relink.meta.taille = f.size; save(); }
   closeModal('ovRelink'); _relink = null;
-  renderEquip(); try{ renderSchemas(); }catch(e){}
+  renderEquip(); try{ renderSchemas(); renderFactures(); }catch(e){}
   toast('Fichier rattaché ✓');
 }
 /* ===== Affichage PDF toutes pages (pdf.js) ===== */
@@ -1124,8 +1192,8 @@ document.addEventListener('click', function(e){
   const picker = chip.closest('.cat-picker');
   if(!picker) return;
   const pickerId = picker.id;
-  const hiddenId = pickerId==='eqCatPicker' ? 'eqCat' : pickerId==='schemaCatPicker' ? 'schemaCat' : 'depCat';
-  const target = pickerId==='eqCatPicker' ? 'eq' : pickerId==='schemaCatPicker' ? 'schema' : 'dep';
+  const hiddenId = pickerId==='eqCatPicker' ? 'eqCat' : pickerId==='schemaCatPicker' ? 'schemaCat' : pickerId==='factCatPicker' ? 'factCat' : 'depCat';
+  const target = pickerId==='eqCatPicker' ? 'eq' : pickerId==='schemaCatPicker' ? 'schema' : pickerId==='factCatPicker' ? 'fact' : 'dep';
   if(chip.classList.contains('perso')){
     openCatPersoModal(target);
     return;
@@ -1435,6 +1503,7 @@ function allNoticeIds(){
   const ids = [];
   state.equipements.forEach(eq=>(eq.notices||[]).forEach(n=>ids.push(n.id)));
   state.schemas.forEach(sc=>{ if(sc.pdf && sc.pdf.id) ids.push(sc.pdf.id); });
+  (state.factures||[]).forEach(f=>(f.notices||[]).forEach(n=>ids.push(n.id)));
   return ids;
 }
 function blobToDataURL(b){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(b); }); }
@@ -1484,15 +1553,16 @@ function importData(event){
       if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
       if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
       if(!Array.isArray(state.memos)) state.memos = [];
+      if(!Array.isArray(state.factures)) state.factures = [];
       save();
       populateEqCatOptions(); populateSchemaCatOptions(); populateDepCatOptions();
-      renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos(); applyColors();
+      renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos(); renderFactures(); applyColors();
       const ids = Object.keys(fichiers);
       document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi.'+(ids.length? ' Restauration des photos et notices…':'')+'</span>';
       (async ()=>{
         let ok = 0;
         for(const id of ids){ try{ await noticePut(id, await dataURLToBlob(fichiers[id].data)); forgetThumb(id); ok++; }catch(e){} }
-        if(ids.length){ renderEquip(); try{ renderSchemas(); }catch(e){}
+        if(ids.length){ renderEquip(); try{ renderSchemas(); renderFactures(); }catch(e){}
           document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi : '+ok+' photo(s)/notice(s) restaurée(s).</span>'; }
       })();
     }catch(err){
@@ -1555,6 +1625,10 @@ function confirmCatPerso(){
     if(!SCHEMA_CATS_FIXES.includes(val) && !state.customSchemaCats.includes(val)) state.customSchemaCats.push(val);
     save();
     populateSchemaCatOptions(val);
+  } else if(_catPersoTarget==='fact'){
+    if(!EQUIP_CATS_FIXES.includes(val) && !state.customEqCats.includes(val)) state.customEqCats.push(val);
+    save();
+    renderCatPicker('factCatPicker','factCat',EQUIP_CATS_FIXES,state.customEqCats,val);
   } else if(_catPersoTarget==='dep'){
     if(!DEP_CATS_FIXES.includes(val) && !state.customDepCats.includes(val)) state.customDepCats.push(val);
     save();
@@ -1587,7 +1661,7 @@ function openEquipModal(id){
   toggleEqDateInconnue();
   document.getElementById('eqNotice').value = eq?.notice||'';
   _formNotices = (eq?.notices||[]).map(n=>({...n}));
-  _formNoticesRemoved = [];
+  _formNoticesRemoved = []; _noticeListEl = 'eqNoticeList';
   renderFormNotices();
   document.getElementById('eqNotes').value = eq?.notes||'';
   document.getElementById('ovEquip').classList.add('open');
@@ -2243,6 +2317,133 @@ function memoClearDone(){
   state.memos = state.memos.filter(m=>!m.done); save(); renderMemos();
 }
 
+// ---- FACTURES ----
+// Mêmes catégories que les équipements (fixes + personnalisées), pour classer de la même manière.
+function factCats(){ return EQUIP_CATS_FIXES.concat((state.customEqCats||[]).slice().sort((a,b)=>a.localeCompare(b,'fr'))); }
+function openFactModal(id){
+  const f = id? state.factures.find(x=>x.id===id) : null;
+  document.getElementById('factModalTitle').textContent = id? 'Modifier la facture' : 'Nouvelle facture';
+  document.getElementById('factId').value = id||'';
+  document.getElementById('factFour').value = f?.fournisseur||'';
+  document.getElementById('factObj').value = f?.objet||'';
+  document.getElementById('factDate').value = f?.date || new Date().toISOString().slice(0,10);
+  document.getElementById('factMontant').value = (f && f.montant!=null)? String(f.montant).replace('.',',') : '';
+  document.getElementById('factNum').value = f?.numero||'';
+  document.getElementById('factNotes').value = f?.notes||'';
+  const cat = f?.categorie || EQUIP_CATS_FIXES[0];
+  if(!factCats().includes(cat)) state.customEqCats.push(cat);
+  renderCatPicker('factCatPicker','factCat',EQUIP_CATS_FIXES,state.customEqCats,cat);
+  const sel = document.getElementById('factEq');
+  sel.innerHTML = '<option value="">— Aucun —</option>' + state.equipements.slice().sort((a,b)=>a.nom.localeCompare(b.nom,'fr'))
+    .map(e=>'<option value="'+e.id+'">'+escNotice(e.nom)+'</option>').join('');
+  sel.value = f?.equipementId||'';
+  sel.onchange = ()=>{ const e = state.equipements.find(x=>x.id===sel.value); if(e && e.categorie) renderCatPicker('factCatPicker','factCat',EQUIP_CATS_FIXES,state.customEqCats,e.categorie); };
+  _noticeListEl = 'factFileList';
+  _formNotices = (f?.notices||[]).map(n=>({...n})); _formNoticesRemoved = [];
+  renderFormNotices();
+  document.getElementById('ovFact').classList.add('open');
+}
+function cancelFactModal(){
+  _formNotices.filter(n=>n._new).forEach(n=>noticeDel(n.id));
+  _formNotices=[]; _formNoticesRemoved=[];
+  closeModal('ovFact');
+}
+function saveFact(){
+  const id = document.getElementById('factId').value;
+  const four = document.getElementById('factFour').value.trim();
+  const obj = document.getElementById('factObj').value.trim();
+  if(!four && !obj){ alert('Indiquez au moins le fournisseur ou l\'objet de la facture.'); return; }
+  const m = parseFloat(String(document.getElementById('factMontant').value).replace(/\s/g,'').replace(',','.'));
+  const data = {
+    fournisseur: four, objet: obj,
+    categorie: document.getElementById('factCat').value || EQUIP_CATS_FIXES[0],
+    date: document.getElementById('factDate').value,
+    montant: isNaN(m)? null : Math.round(m*100)/100,
+    numero: document.getElementById('factNum').value.trim(),
+    equipementId: document.getElementById('factEq').value,
+    notes: document.getElementById('factNotes').value.trim(),
+    notices: _formNotices.map(({_new,...n})=>n)
+  };
+  if(id) Object.assign(state.factures.find(x=>x.id===id), data);
+  else state.factures.push({id:uid(), ...data});
+  _formNoticesRemoved.forEach(noticeDel);
+  _formNotices=[]; _formNoticesRemoved=[];
+  save(); closeModal('ovFact'); renderFactures();
+  toast('Facture enregistrée ✓');
+}
+function deleteFact(id){
+  if(!confirm('Supprimer cette facture et ses pièces jointes ?')) return;
+  const f = state.factures.find(x=>x.id===id);
+  (f?.notices||[]).forEach(n=>noticeDel(n.id));
+  state.factures = state.factures.filter(x=>x.id!==id);
+  save(); renderFactures();
+}
+function resetFactSearch(){
+  ['fsTxt','fsMin','fsMax','fsDu','fsAu'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('fsCat').value='';
+  renderFactures();
+}
+function renderFactures(){
+  const box = document.getElementById('factList'); if(!box) return;
+  // liste des catégories de la recherche
+  const selCat = document.getElementById('fsCat');
+  const curCat = selCat.value;
+  const catsUtilisees = factCats().concat(state.factures.map(f=>f.categorie)).filter((c,i,a)=>c && a.indexOf(c)===i);
+  selCat.innerHTML = '<option value="">Toutes</option>' + catsUtilisees.map(c=>'<option'+(c===curCat?' selected':'')+'>'+escNotice(c)+'</option>').join('');
+  // critères
+  const norm = t=>String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const txt = norm(document.getElementById('fsTxt').value.trim());
+  const num = id=>parseFloat(String(document.getElementById(id).value).replace(/\s/g,'').replace(',','.'));
+  const vmin = num('fsMin'), vmax = num('fsMax');
+  const du = document.getElementById('fsDu').value, au = document.getElementById('fsAu').value;
+  const actif = !!(txt || curCat || !isNaN(vmin) || !isNaN(vmax) || du || au);
+  document.getElementById('fsReset').hidden = !actif;
+  const eqNom = id=>{ const e = state.equipements.find(x=>x.id===id); return e? e.nom : ''; };
+  const liste = state.factures.filter(f=>{
+    if(curCat && f.categorie!==curCat) return false;
+    const mt = Number(f.montant)||0;
+    if(!isNaN(vmin) && mt < vmin) return false;
+    if(!isNaN(vmax) && mt > vmax) return false;
+    if(du && (!f.date || f.date < du)) return false;
+    if(au && (!f.date || f.date > au)) return false;
+    if(txt && !norm([f.fournisseur,f.objet,f.numero,f.notes,eqNom(f.equipementId)].join(' ')).includes(txt)) return false;
+    return true;
+  });
+  const total = liste.reduce((s,f)=>s+(Number(f.montant)||0),0);
+  document.getElementById('fsResult').innerHTML = state.factures.length
+    ? '<b>'+liste.length+'</b> facture'+(liste.length>1?'s':'')+(actif?' trouvée'+(liste.length>1?'s':''):'')+' · total <b>'+fmtEuro(total)+'</b>'
+    : '';
+  if(!state.factures.length){ box.innerHTML = '<div class="empty">Aucune facture enregistrée.<br>Photographiez ou joignez vos factures pour les retrouver facilement.</div>'; return; }
+  if(!liste.length){ box.innerHTML = '<div class="empty">Aucune facture ne correspond à cette recherche.</div>'; return; }
+  const groupes = catsUtilisees.map(cat=>({cat, items: liste.filter(f=>f.categorie===cat).sort((a,b)=>(b.date||'').localeCompare(a.date||''))})).filter(g=>g.items.length);
+  box.innerHTML = '<div class="eq-columns">' + groupes.map(g=>`
+    <div class="eq-column">
+      <div class="eq-column-title">${escNotice(g.cat)} (${g.items.length})</div>
+      <div class="eq-column-total">Total : ${fmtEuro(g.items.reduce((s,f)=>s+(Number(f.montant)||0),0))}</div>
+      ${g.items.map(renderFactCard).join('')}
+    </div>`).join('') + '</div>';
+  hydrateThumbs(box);
+}
+function renderFactCard(f){
+  const imgs = (f.notices||[]).filter(isImgNotice), docs = (f.notices||[]).filter(n=>!isImgNotice(n));
+  const eqn = f.equipementId ? (state.equipements.find(x=>x.id===f.equipementId)||{}).nom : '';
+  const meta = [fmtDate(f.date), f.numero? 'N° '+escNotice(f.numero):'', eqn? '⚙️ '+escNotice(eqn):''].filter(Boolean).join(' · ');
+  return `<div class="card fact-card">
+    <div class="fact-top">
+      <div style="min-width:0">
+        <div class="fact-four">${escNotice(f.fournisseur||f.objet||'Facture')}</div>
+        ${f.fournisseur && f.objet? '<div class="fact-obj">'+escNotice(f.objet)+'</div>':''}
+      </div>
+      <div class="fact-amt">${f.montant!=null? fmtEuro(f.montant):'—'}</div>
+    </div>
+    <div class="fact-meta">${meta}</div>
+    ${imgs.length? '<div class="notice-thumbs">'+imgs.map(n=>'<button class="nthumb" onclick="openNotice(\''+f.id+'\',\''+n.id+'\')"><img data-nid="'+n.id+'" alt="" loading="lazy"></button>').join('')+'</div>':''}
+    ${docs.length? '<div class="notice-btns">'+docs.map(n=>'<button class="small" onclick="openNotice(\''+f.id+'\',\''+n.id+'\')">📄 '+escNotice(n.nom.replace(/\.pdf$/i,''))+'</button>').join('')+'</div>':''}
+    ${f.notes? '<div class="fact-meta" style="white-space:pre-wrap">'+escNotice(f.notes)+'</div>':''}
+    <div class="fact-actions"><button class="icon" onclick="openFactModal('${f.id}')" aria-label="Modifier">✏️</button><button class="icon" onclick="deleteFact('${f.id}')" aria-label="Supprimer">🗑</button></div>
+  </div>`;
+}
+
 // ---- INIT ----
 load(); try{ applyColors(); }catch(e){ console.error('couleurs', e); }
 renderMemos();
@@ -2252,6 +2453,7 @@ renderDep();
 renderEcheances();
 renderTravaux();
 renderSchemas();
+renderFactures();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

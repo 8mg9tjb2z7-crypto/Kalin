@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kalin-cache-v11';
+const CACHE_NAME = 'kalin-cache-v12';
 const ASSETS = [
   './',
   './index.html',
