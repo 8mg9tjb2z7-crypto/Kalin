@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kalin-cache-v8';
+const CACHE_NAME = 'kalin-cache-v9';
 const ASSETS = [
   './',
   './index.html',
@@ -23,7 +23,8 @@ self.addEventListener('install', (event) => {
       )
     )
   );
-  self.skipWaiting();
+  // Pas de skipWaiting : la nouvelle version prend le relais au prochain lancement,
+  // sans interrompre l'app pendant qu'elle démarre (évite la fermeture éclair sur iPad).
 });
 
 self.addEventListener('activate', (event) => {
@@ -32,7 +33,6 @@ self.addEventListener('activate', (event) => {
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
     )
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {

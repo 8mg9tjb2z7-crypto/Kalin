@@ -2166,7 +2166,7 @@ function memoClearDone(){
 }
 
 // ---- INIT ----
-load(); applyColors();
+load(); try{ applyColors(); }catch(e){ console.error('couleurs', e); }
 renderMemos();
 renderEquip();
 renderDepEquipOptions();
@@ -2177,7 +2177,7 @@ renderSchemas();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    setTimeout(() => { navigator.serviceWorker.register('sw.js').catch(() => {}); }, 3000);
   });
 }
 </script>
