@@ -238,12 +238,23 @@ main:has(#sec-equip.active){max-width:none;}
 .memo-head{display:flex; align-items:center; justify-content:space-between; gap:10px; height:32px; margin-bottom:6px;}
 .memo-title{font-family:"Marker Felt","Chalkboard SE",cursive; font-size:1.25rem; font-weight:700; color:#8a5a00;}
 .memo-clear{background:none; border:none; color:#8a6a10; font-size:.78rem; text-decoration:underline; cursor:pointer; padding:2px 4px;}
-.memo-list{columns:300px; column-gap:32px; margin:0; padding:0; list-style:none;}
-.memo-item{display:flex; align-items:flex-start; gap:8px; min-height:32px; line-height:32px; break-inside:avoid;}
-.memo-chk{flex:none; width:20px; height:20px; margin-top:6px; border:2px solid #8a6a10; border-radius:5px; background:transparent; padding:0; cursor:pointer; color:#2f7a2f; font-size:15px; line-height:16px; font-weight:800;}
-.memo-txt{flex:1; min-width:0; font-family:"Noteworthy","Chalkboard SE",-apple-system,sans-serif; font-size:1.02rem; outline:none; word-break:break-word; white-space:pre-wrap;}
+.memo-list{columns:300px; column-gap:18px; margin:0 0 10px; padding:0 0 0 22px; list-style:none; position:relative; z-index:1;}
+.memo-item{display:flex; align-items:flex-start; gap:10px; break-inside:avoid; margin:0 0 10px; padding:10px 8px 10px 12px;
+  background:rgba(255,255,255,.82); border:1px solid rgba(120,95,20,.25); border-left:6px solid var(--mc,#e0a800);
+  border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.12); line-height:1.4;}
+.memo-item:nth-child(6n+1){--mc:#e0a800;} .memo-item:nth-child(6n+2){--mc:#2b8fc7;} .memo-item:nth-child(6n+3){--mc:#d0573a;}
+.memo-item:nth-child(6n+4){--mc:#3f9a4a;} .memo-item:nth-child(6n+5){--mc:#8a5cc2;} .memo-item:nth-child(6n+6){--mc:#c2448a;}
+.memo-chk{flex:none; width:24px; height:24px; margin-top:1px; border:2px solid #8a6a10; border-radius:6px; background:#fff; padding:0; cursor:pointer; color:#2f7a2f; font-size:17px; line-height:20px; font-weight:800;}
+.memo-txt{flex:1; min-width:0; font-family:"Noteworthy","Chalkboard SE",-apple-system,sans-serif; font-size:1.05rem; word-break:break-word; white-space:pre-wrap; cursor:text; padding-top:1px;}
+.memo-item.done{background:rgba(255,255,255,.45); box-shadow:none;}
 .memo-item.done .memo-txt{text-decoration:line-through; opacity:.5;}
-.memo-del{flex:none; background:none; border:none; color:#a08a40; font-size:1.1rem; cursor:pointer; padding:0 4px; line-height:32px;}
+.memo-btn{flex:none; background:none; border:none; font-size:1.15rem; cursor:pointer; padding:0 4px; line-height:26px; color:#8a6a10;}
+.memo-del{color:#b04a3a;}
+.memo-item.editing{flex-direction:column; align-items:stretch; gap:8px; border-left-color:#0f6e8c; box-shadow:0 0 0 3px rgba(15,110,140,.35), 0 2px 6px rgba(0,0,0,.12);}
+.memo-edit{width:100%; box-sizing:border-box; min-height:70px; resize:vertical; font-family:"Noteworthy","Chalkboard SE",-apple-system,sans-serif; font-size:1.05rem; line-height:1.4; padding:8px; border:1px solid #c9b25a; border-radius:8px; background:#fff; color:#3b3410;}
+.memo-edit-bar{display:flex; gap:8px; justify-content:flex-end;}
+.memo-edit-bar button{border:none; border-radius:8px; padding:8px 16px; font-size:.95rem; font-weight:600; cursor:pointer;}
+.memo-ok{background:#0f6e8c; color:#fff;} .memo-cancel{background:#eee4bf; color:#5a4a10;}
 .memo-add{display:flex; gap:8px; align-items:center; height:32px;}
 .memo-add input{flex:1; background:transparent; border:none; outline:none; color:#3b3410; font-family:"Noteworthy","Chalkboard SE",-apple-system,sans-serif; font-size:1.02rem; padding:0; height:32px;}
 .memo-add input::placeholder{color:#a8964f; font-style:italic;}
@@ -2131,15 +2142,24 @@ function renderDep(){
 
 // ---- PENSE-BÊTE ----
 function memoEsc(t){ return String(t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let memoEditing = null;
 function renderMemos(){
   const ul = document.getElementById('memoList');
   if(!ul) return;
-  ul.innerHTML = state.memos.map(m=>`<li class="memo-item ${m.done?'done':''}">
+  ul.innerHTML = state.memos.map(m=> m.id===memoEditing ? `<li class="memo-item editing">
+    <textarea class="memo-edit" id="memoEditBox" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();memoSave('${m.id}');}">${memoEsc(m.txt)}</textarea>
+    <div class="memo-edit-bar">
+      <button class="memo-cancel" onclick="memoCancel()">Annuler</button>
+      <button class="memo-ok" onclick="memoSave('${m.id}')">✓ Valider</button>
+    </div>
+  </li>` : `<li class="memo-item ${m.done?'done':''}">
     <button class="memo-chk" onclick="memoToggle('${m.id}')" aria-label="Cocher">${m.done?'✓':''}</button>
-    <div class="memo-txt" contenteditable="true" onblur="memoEdit('${m.id}',this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">${memoEsc(m.txt)}</div>
-    <button class="memo-del" onclick="memoDelete('${m.id}')" aria-label="Supprimer">✕</button>
+    <div class="memo-txt" onclick="memoStartEdit('${m.id}')">${memoEsc(m.txt)}</div>
+    <button class="memo-btn" onclick="memoStartEdit('${m.id}')" aria-label="Modifier">✏️</button>
+    <button class="memo-btn memo-del" onclick="memoDelete('${m.id}')" aria-label="Supprimer">✕</button>
   </li>`).join('');
   document.getElementById('memoClear').hidden = !state.memos.some(m=>m.done);
+  if(memoEditing){ const t = document.getElementById('memoEditBox'); if(t){ t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }
 }
 function memoAdd(){
   const inp = document.getElementById('memoInput');
@@ -2150,15 +2170,20 @@ function memoAdd(){
   save(); renderMemos();
 }
 function memoToggle(id){ const m = state.memos.find(x=>x.id===id); if(m){ m.done = !m.done; save(); renderMemos(); } }
-function memoEdit(id, el){
-  const m = state.memos.find(x=>x.id===id); if(!m) return;
-  const txt = el.innerText.trim();
-  if(!txt){ state.memos = state.memos.filter(x=>x.id!==id); }
-  else if(txt===m.txt) return;
-  else m.txt = txt;
-  save(); renderMemos();
+function memoStartEdit(id){ memoEditing = id; renderMemos(); }
+function memoCancel(){ memoEditing = null; renderMemos(); }
+function memoSave(id){
+  const m = state.memos.find(x=>x.id===id); const t = document.getElementById('memoEditBox');
+  memoEditing = null;
+  if(m && t){
+    const txt = t.value.trim();
+    if(!txt){ if(confirm('Note vide : la supprimer ?')) state.memos = state.memos.filter(x=>x.id!==id); }
+    else m.txt = txt;
+    save();
+  }
+  renderMemos();
 }
-function memoDelete(id){ state.memos = state.memos.filter(x=>x.id!==id); save(); renderMemos(); }
+function memoDelete(id){ if(!confirm('Supprimer cette note ?')) return; memoEditing = null; state.memos = state.memos.filter(x=>x.id!==id); save(); renderMemos(); }
 function memoClearDone(){
   const n = state.memos.filter(m=>m.done).length;
   if(!n || !confirm('Effacer '+n+' note'+(n>1?'s':'')+' cochée'+(n>1?'s':'')+' ?')) return;
