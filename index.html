@@ -217,8 +217,12 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
 .color-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px;}
 .swatch{width:34px; height:34px; border-radius:50%; border:2px solid var(--border); padding:0; cursor:pointer; flex:none;}
 .swatch.sel{outline:3px solid var(--text); outline-offset:2px;}
-.color-row input[type=color]{width:46px; height:36px; padding:2px; border-radius:9px; flex:none; cursor:pointer;}
-.color-row .clbl{font-size:0.78rem; color:var(--sub);}
+.more-btn{display:flex; align-items:center; gap:6px; padding:5px 10px 5px 5px; border-radius:20px; font-size:0.8rem; background:transparent; color:var(--text); border:1px solid var(--border);}
+.more-btn .dot{width:24px; height:24px; border-radius:50%; border:1px solid var(--border); background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);}
+.more-btn.sel{outline:3px solid var(--text); outline-offset:2px;}
+.palette{display:grid; grid-template-columns:repeat(13,1fr); gap:5px; margin:8px 0 6px; padding:8px; border:1px solid var(--border); border-radius:12px; background:var(--bg);}
+.palette button{aspect-ratio:1; width:100%; padding:0; border-radius:7px; border:1px solid rgba(0,0,0,.12);}
+.palette button.sel{outline:3px solid var(--text); outline-offset:1px;}
 .cat-chip.perso.active{background:var(--accent); color:#fff; border-style:solid;}
 
 /* ===== Page d'accueil pleine largeur + Pense-bête ===== */
@@ -1352,14 +1356,30 @@ function setColor(key, val){
   save(); applyColors(); renderColorPickers();
 }
 function resetColors(){ delete state.couleurs; save(); applyColors(); renderColorPickers(); }
+function hslHex(h, s, l){
+  s/=100; l/=100;
+  const f=n=>{ const k=(n+h/30)%12, a=s*Math.min(l,1-l); return Math.round(255*(l-a*Math.max(-1,Math.min(k-3,9-k,1)))).toString(16).padStart(2,'0'); };
+  return '#'+f(0)+f(8)+f(4);
+}
+const FULL_PALETTE = (()=>{
+  const out=[], rows=[[90,93],[75,85],[65,70],[60,52],[55,40],[60,28]];
+  rows.forEach(([sat,lum],ri)=>{
+    for(let i=0;i<12;i++) out.push(hslHex(i*30, sat, lum));
+    out.push(hslHex(0,0,[97,88,70,50,32,15][ri]));
+  });
+  return out;
+})();
+let _paletteOpen = null;
+function togglePalette(key){ _paletteOpen = (_paletteOpen===key? null : key); renderColorPickers(); }
 function renderColorPickers(){
   const c = getColors();
   const build = (id, key, presets)=>{
     const cur = c[key];
     const sw = presets.map(p=>'<button type="button" class="swatch'+(p===cur?' sel':'')+'" style="background:'+p+'" aria-label="'+p+'" onclick="setColor(\''+key+'\',\''+p+'\')"></button>').join('');
     const custom = !presets.includes(cur);
-    document.getElementById(id).innerHTML = sw +
-      '<input type="color" value="'+cur+'" onchange="setColor(\''+key+'\',this.value)" title="Autre couleur"'+(custom?' style="outline:3px solid var(--text); outline-offset:2px"':'')+'><span class="clbl">Autre…</span>';
+    const more = '<button type="button" class="more-btn'+(custom?' sel':'')+'" onclick="togglePalette(\''+key+'\')"><span class="dot"'+(custom?' style="background:'+cur+'"':'')+'></span>Autre…</button>';
+    const pal = _paletteOpen===key ? '<div class="palette" style="flex-basis:100%">'+FULL_PALETTE.map(p=>'<button type="button"'+(p===cur?' class="sel"':'')+' style="background:'+p+'" onclick="setColor(\''+key+'\',\''+p+'\')"></button>').join('')+'</div>' : '';
+    document.getElementById(id).innerHTML = sw + more + pal;
   };
   build('memoSwatches','memo',MEMO_PRESETS);
   build('accentSwatches','accent',ACCENT_PRESETS);
@@ -1368,7 +1388,7 @@ function renderColorPickers(){
 // ---- EXPORT / IMPORT ----
 function openParamsModal(){
   document.getElementById('importMsg').textContent = '';
-  renderColorPickers();
+  _paletteOpen = null; renderColorPickers();
   document.getElementById('ovParams').classList.add('open');
 }
 function exportData(){
