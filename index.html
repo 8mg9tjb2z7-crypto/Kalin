@@ -97,6 +97,9 @@ input,select,textarea{
   background:var(--bg); color:var(--text); font-size:0.92rem; font-family:inherit;
 }
 textarea{resize:vertical; min-height:50px;}
+input,select,textarea{box-sizing:border-box; min-width:0; max-width:100%;}
+input[type=date]{-webkit-appearance:none; appearance:none; display:block; min-height:42px; text-align:left;}
+.modal div[style*="grid"] > div{min-width:0;}
 .modal-actions{display:flex; gap:10px; margin-top:18px;}
 .modal-actions button{flex:1;}
 .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
@@ -386,14 +389,13 @@ main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
     <label>Catégorie</label>
     <input type="hidden" id="factCat">
     <div class="cat-picker" id="factCatPicker"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 14px">
       <div><label>Date</label><input id="factDate" type="date"></div>
       <div><label>Montant TTC (€)</label><input id="factMontant" type="text" inputmode="decimal" placeholder="0,00"></div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div><label>N° de facture (facultatif)</label><input id="factNum"></div>
-      <div><label>Équipement concerné (facultatif)</label><select id="factEq"></select></div>
-    </div>
+    <label>N° de facture (facultatif)</label><input id="factNum">
+    <label>Équipement concerné (facultatif)</label>
+    <select id="factEq"></select>
     <label>Facture (photo ou PDF)</label>
     <div class="notice-box">
       <div id="factFileList"></div>
@@ -550,8 +552,8 @@ main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
 <!-- MODAL CATEGORIE PERSONNALISEE -->
 <div class="overlay" id="ovCatPerso">
   <div class="modal">
-    <h2>Catégorie personnalisée</h2>
-    <label>Nom de la catégorie</label>
+    <h2 id="catPersoTitle">Catégorie personnalisée</h2>
+    <label id="catPersoLabel">Nom de la catégorie</label>
     <input id="catPersoInput" placeholder="Ex : Domotique">
     <div class="modal-actions">
       <button class="ghost" onclick="cancelCatPerso()">Annuler</button>
@@ -691,7 +693,7 @@ main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
 </div>
 
 <script>
-let state = {equipements:[], depenses:[], travaux:[], schemas:[], factures:[], customEqCats:[], customSchemaCats:[], customDepCats:[]};
+let state = {equipements:[], depenses:[], travaux:[], schemas:[], factures:[], customFactEqs:[], customEqCats:[], customSchemaCats:[], customDepCats:[]};
 
 function load(){
   try{
@@ -706,7 +708,7 @@ function load(){
   if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
   if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
   if(!Array.isArray(state.memos)) state.memos = [];
-  if(!Array.isArray(state.factures)) state.factures = [];
+  if(!Array.isArray(state.factures)) state.factures = []; if(!Array.isArray(state.customFactEqs)) state.customFactEqs = [];
   state.travaux.forEach(t=>{ if(!Array.isArray(t.achats)) t.achats = []; });
   state.equipements.forEach(eq=>{ if(!Array.isArray(eq.achats)) eq.achats = []; if(!Array.isArray(eq.entretiens)) eq.entretiens = []; eq.open = false;
     eq.entretiens.forEach(en=>{ if(en.notes && String(en.notes).trim()){ en.desc = (en.desc||'') + '\n\n' + String(en.notes).trim(); } delete en.notes; });
@@ -1556,7 +1558,7 @@ function importData(event){
       if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
       if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
       if(!Array.isArray(state.memos)) state.memos = [];
-      if(!Array.isArray(state.factures)) state.factures = [];
+      if(!Array.isArray(state.factures)) state.factures = []; if(!Array.isArray(state.customFactEqs)) state.customFactEqs = [];
       save();
       populateEqCatOptions(); populateSchemaCatOptions(); populateDepCatOptions();
       renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos(); renderFactures(); applyColors();
@@ -1610,11 +1612,16 @@ function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 let _catPersoTarget = null;
 function openCatPersoModal(target){
   _catPersoTarget = target;
+  const fe = target==='facteq';
+  document.getElementById('catPersoTitle').textContent = fe? 'Étiquette personnalisée' : 'Catégorie personnalisée';
+  document.getElementById('catPersoLabel').textContent = fe? "Nom de l'étiquette" : 'Nom de la catégorie';
+  document.getElementById('catPersoInput').placeholder = fe? 'Ex : Annexe, Hors-bord, Place de port…' : 'Ex : Domotique';
   document.getElementById('catPersoInput').value = '';
   document.getElementById('ovCatPerso').classList.add('open');
   setTimeout(()=>document.getElementById('catPersoInput').focus(), 60);
 }
 function cancelCatPerso(){
+  if(_catPersoTarget==='facteq') fillFactEq(_factEqPrev);
   closeModal('ovCatPerso');
 }
 function confirmCatPerso(){
@@ -1628,6 +1635,11 @@ function confirmCatPerso(){
     if(!SCHEMA_CATS_FIXES.includes(val) && !state.customSchemaCats.includes(val)) state.customSchemaCats.push(val);
     save();
     populateSchemaCatOptions(val);
+  } else if(_catPersoTarget==='facteq'){
+    const eq = state.equipements.find(e=>e.nom.toLowerCase()===val.toLowerCase());
+    if(!eq && !state.customFactEqs.includes(val)) state.customFactEqs.push(val);
+    save();
+    fillFactEq(eq? 'eq:'+eq.id : 'lbl:'+val);
   } else if(_catPersoTarget==='fact'){
     if(!EQUIP_CATS_FIXES.includes(val) && !state.customEqCats.includes(val)) state.customEqCats.push(val);
     save();
@@ -2323,6 +2335,24 @@ function memoClearDone(){
 // ---- FACTURES ----
 // Mêmes catégories que les équipements (fixes + personnalisées), pour classer de la même manière.
 function factCats(){ return EQUIP_CATS_FIXES.concat((state.customEqCats||[]).slice().sort((a,b)=>a.localeCompare(b,'fr'))); }
+let _factEqPrev = '';
+function fillFactEq(val){
+  const sel = document.getElementById('factEq');
+  const lbls = (state.customFactEqs||[]).slice();
+  if(val && val.startsWith('lbl:') && !lbls.includes(val.slice(4))) lbls.push(val.slice(4));
+  lbls.sort((a,b)=>a.localeCompare(b,'fr'));
+  const eqs = state.equipements.slice().sort((a,b)=>a.nom.localeCompare(b.nom,'fr'));
+  sel.innerHTML = '<option value="">— Aucun —</option>'
+    + (eqs.length? '<optgroup label="Équipements">'+eqs.map(e=>'<option value="eq:'+e.id+'">'+escNotice(e.nom)+'</option>').join('')+'</optgroup>':'')
+    + (lbls.length? '<optgroup label="Étiquettes personnalisées">'+lbls.map(l=>'<option value="lbl:'+escNotice(l)+'">🏷️ '+escNotice(l)+'</option>').join('')+'</optgroup>':'')
+    + '<option value="__new__">+ Ajouter une étiquette personnalisée…</option>';
+  sel.value = val||''; _factEqPrev = sel.value;
+  sel.onchange = ()=>{
+    if(sel.value==='__new__'){ openCatPersoModal('facteq'); return; }
+    _factEqPrev = sel.value;
+    if(sel.value.startsWith('eq:')){ const e = state.equipements.find(x=>x.id===sel.value.slice(3)); if(e && e.categorie) renderCatPicker('factCatPicker','factCat',EQUIP_CATS_FIXES,state.customEqCats,e.categorie); }
+  };
+}
 function openFactModal(id){
   const f = id? state.factures.find(x=>x.id===id) : null;
   document.getElementById('factModalTitle').textContent = id? 'Modifier la facture' : 'Nouvelle facture';
@@ -2336,11 +2366,7 @@ function openFactModal(id){
   const cat = f?.categorie || EQUIP_CATS_FIXES[0];
   if(!factCats().includes(cat)) state.customEqCats.push(cat);
   renderCatPicker('factCatPicker','factCat',EQUIP_CATS_FIXES,state.customEqCats,cat);
-  const sel = document.getElementById('factEq');
-  sel.innerHTML = '<option value="">— Aucun —</option>' + state.equipements.slice().sort((a,b)=>a.nom.localeCompare(b.nom,'fr'))
-    .map(e=>'<option value="'+e.id+'">'+escNotice(e.nom)+'</option>').join('');
-  sel.value = f?.equipementId||'';
-  sel.onchange = ()=>{ const e = state.equipements.find(x=>x.id===sel.value); if(e && e.categorie) renderCatPicker('factCatPicker','factCat',EQUIP_CATS_FIXES,state.customEqCats,e.categorie); };
+  fillFactEq(f?.equipementId? 'eq:'+f.equipementId : f?.equipementLabel? 'lbl:'+f.equipementLabel : '');
   _noticeListEl = 'factFileList';
   _formNotices = (f?.notices||[]).map(n=>({...n})); _formNoticesRemoved = [];
   renderFormNotices();
@@ -2363,7 +2389,8 @@ function saveFact(){
     date: document.getElementById('factDate').value,
     montant: isNaN(m)? null : Math.round(m*100)/100,
     numero: document.getElementById('factNum').value.trim(),
-    equipementId: document.getElementById('factEq').value,
+    equipementId: _factEqPrev.startsWith('eq:')? _factEqPrev.slice(3) : '',
+    equipementLabel: _factEqPrev.startsWith('lbl:')? _factEqPrev.slice(4) : '',
     notes: document.getElementById('factNotes').value.trim(),
     notices: _formNotices.map(({_new,...n})=>n)
   };
@@ -2409,7 +2436,7 @@ function renderFactures(){
     if(!isNaN(vmax) && mt > vmax) return false;
     if(du && (!f.date || f.date < du)) return false;
     if(au && (!f.date || f.date > au)) return false;
-    if(txt && !norm([f.fournisseur,f.objet,f.numero,f.notes,eqNom(f.equipementId)].join(' ')).includes(txt)) return false;
+    if(txt && !norm([f.fournisseur,f.objet,f.numero,f.notes,eqNom(f.equipementId),f.equipementLabel].join(' ')).includes(txt)) return false;
     return true;
   });
   const total = liste.reduce((s,f)=>s+(Number(f.montant)||0),0);
@@ -2430,7 +2457,7 @@ function renderFactures(){
 function renderFactCard(f){
   const imgs = (f.notices||[]).filter(isImgNotice), docs = (f.notices||[]).filter(n=>!isImgNotice(n));
   const eqn = f.equipementId ? (state.equipements.find(x=>x.id===f.equipementId)||{}).nom : '';
-  const meta = [fmtDate(f.date), f.numero? 'N° '+escNotice(f.numero):'', eqn? '⚙️ '+escNotice(eqn):''].filter(Boolean).join(' · ');
+  const meta = [fmtDate(f.date), f.numero? 'N° '+escNotice(f.numero):'', eqn? '⚙️ '+escNotice(eqn):'', f.equipementLabel? '🏷️ '+escNotice(f.equipementLabel):''].filter(Boolean).join(' · ');
   return `<div class="card fact-card">
     <div class="fact-top">
       <div style="min-width:0">
