@@ -214,15 +214,20 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
 .cat-chip{padding:6px 13px; border-radius:20px; border:1px solid var(--border); font-size:0.82rem; cursor:pointer; background:var(--card); color:var(--text); user-select:none;}
 .cat-chip.active{background:var(--accent); color:#fff; border-color:var(--accent);}
 .cat-chip.perso{border:1.5px dashed var(--accent); color:var(--accent); background:transparent;}
+.color-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px;}
+.swatch{width:34px; height:34px; border-radius:50%; border:2px solid var(--border); padding:0; cursor:pointer; flex:none;}
+.swatch.sel{outline:3px solid var(--text); outline-offset:2px;}
+.color-row input[type=color]{width:46px; height:36px; padding:2px; border-radius:9px; flex:none; cursor:pointer;}
+.color-row .clbl{font-size:0.78rem; color:var(--sub);}
 .cat-chip.perso.active{background:var(--accent); color:#fff; border-style:solid;}
 
 /* ===== Page d'accueil pleine largeur + Pense-bête ===== */
 main:has(#sec-equip.active){max-width:none;}
 .memo{
   position:relative; margin:2px 0 14px; padding:12px 16px 10px 46px;
-  background:#fff6b8; color:#3b3410; border-radius:4px 4px 14px 4px;
-  box-shadow:0 2px 0 #e6d98a, 0 6px 14px rgba(120,100,0,.18);
-  background-image:repeating-linear-gradient(to bottom, transparent 0 31px, #e9db8c 31px 32px);
+  background-color:var(--memo-bg,#fff6b8); color:#3b3410; border-radius:4px 4px 14px 4px;
+  box-shadow:0 2px 0 var(--memo-line,#e6d98a), 0 6px 14px rgba(0,0,0,.16);
+  background-image:repeating-linear-gradient(to bottom, transparent 0 31px, var(--memo-line,#e9db8c) 31px 32px);
   background-position:0 50px;
 }
 .memo::before{content:""; position:absolute; top:0; bottom:0; left:34px; border-left:2px solid #f0a3a3;}
@@ -570,6 +575,12 @@ main:has(#sec-equip.active){max-width:none;}
 
 <div class="overlay" id="ovParams">
   <div class="modal">
+    <h2>Couleurs</h2>
+    <label>Fond du pense-bête</label>
+    <div class="color-row" id="memoSwatches"></div>
+    <label>Couleur des bandeaux bleus (onglets, boutons)</label>
+    <div class="color-row" id="accentSwatches"></div>
+    <button class="ghost" style="width:100%; margin:10px 0 18px" onclick="resetColors()">↺ Revenir aux couleurs d'origine</button>
     <h2>Sauvegarde des données</h2>
     <p style="font-size:0.85rem; color:var(--sub); line-height:1.5; margin-top:0">
       Vos données sont enregistrées uniquement sur cet appareil. Exportez régulièrement un fichier de sauvegarde pour ne rien perdre, ou pour transférer vos données vers un autre appareil.
@@ -1316,9 +1327,48 @@ function exportListeAchatCSV(){
   }catch(e){ console.error('csv export error', e); alert('Erreur pendant l\'export CSV.'); }
 }
 
+// ---- COULEURS PERSONNALISÉES ----
+const DEFAULT_COLORS = {memo:'#fff6b8', accent:'#0f6e8c'};
+const MEMO_PRESETS = ['#fff6b8','#ffffff','#ffe4c4','#ffd6e0','#e3f4d7','#d8ecff','#e9e1ff','#ececec'];
+const ACCENT_PRESETS = ['#0f6e8c','#0f3d5c','#1f6fd1','#2a9d8f','#2f8a3e','#c0392b','#d9822b','#6c4bb5','#444a52'];
+function hexMix(a, b, t){ // mélange a vers b (t=0..1)
+  const h=x=>[1,3,5].map(i=>parseInt(x.slice(i,i+2),16));
+  const A=h(a), B=h(b);
+  return '#'+A.map((v,i)=>Math.round(v+(B[i]-v)*t).toString(16).padStart(2,'0')).join('');
+}
+function getColors(){ return Object.assign({}, DEFAULT_COLORS, state.couleurs||{}); }
+function applyColors(){
+  const c = getColors(), r = document.documentElement.style;
+  r.setProperty('--memo-bg', c.memo);
+  r.setProperty('--memo-line', hexMix(c.memo, '#6b5a20', 0.18));
+  if(c.accent && c.accent !== DEFAULT_COLORS.accent){
+    r.setProperty('--accent', c.accent);
+    r.setProperty('--accent2', hexMix(c.accent, '#000000', 0.22));
+  }else{ r.removeProperty('--accent'); r.removeProperty('--accent2'); }
+}
+function setColor(key, val){
+  if(!/^#[0-9a-f]{6}$/i.test(val)) return;
+  state.couleurs = Object.assign({}, state.couleurs||{}, {[key]:val.toLowerCase()});
+  save(); applyColors(); renderColorPickers();
+}
+function resetColors(){ delete state.couleurs; save(); applyColors(); renderColorPickers(); }
+function renderColorPickers(){
+  const c = getColors();
+  const build = (id, key, presets)=>{
+    const cur = c[key];
+    const sw = presets.map(p=>'<button type="button" class="swatch'+(p===cur?' sel':'')+'" style="background:'+p+'" aria-label="'+p+'" onclick="setColor(\''+key+'\',\''+p+'\')"></button>').join('');
+    const custom = !presets.includes(cur);
+    document.getElementById(id).innerHTML = sw +
+      '<input type="color" value="'+cur+'" onchange="setColor(\''+key+'\',this.value)" title="Autre couleur"'+(custom?' style="outline:3px solid var(--text); outline-offset:2px"':'')+'><span class="clbl">Autre…</span>';
+  };
+  build('memoSwatches','memo',MEMO_PRESETS);
+  build('accentSwatches','accent',ACCENT_PRESETS);
+}
+
 // ---- EXPORT / IMPORT ----
 function openParamsModal(){
   document.getElementById('importMsg').textContent = '';
+  renderColorPickers();
   document.getElementById('ovParams').classList.add('open');
 }
 function exportData(){
@@ -1359,7 +1409,7 @@ function importData(event){
       if(!Array.isArray(state.memos)) state.memos = [];
       save();
       populateEqCatOptions(); populateSchemaCatOptions(); populateDepCatOptions();
-      renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos();
+      renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos(); applyColors();
       document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi.</span>';
     }catch(err){
       console.error('import error', err);
@@ -2096,7 +2146,7 @@ function memoClearDone(){
 }
 
 // ---- INIT ----
-load();
+load(); applyColors();
 renderMemos();
 renderEquip();
 renderDepEquipOptions();
