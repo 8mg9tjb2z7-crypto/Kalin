@@ -233,7 +233,7 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
 .cat-chip.perso.active{background:var(--accent); color:#fff; border-style:solid;}
 
 /* ===== Page d'accueil pleine largeur + Pense-bête ===== */
-main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
+main:has(#sec-equip.active), main:has(#sec-factures.active), main:has(#sec-docs.active){max-width:none;}
 .memo{
   position:relative; margin:2px 0 14px; padding:12px 16px 10px 46px;
   background-color:var(--memo-bg,#fff6b8); color:#3b3410; border-radius:4px 4px 14px 4px;
@@ -286,6 +286,12 @@ main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
 .fact-meta{font-size:.76rem; color:var(--sub); margin-top:4px;}
 .fact-actions{display:flex; justify-content:flex-end; gap:4px; margin-top:4px;}
 .eq-column-total{font-size:.78rem; color:var(--sub); font-weight:600; margin:-4px 0 8px;}
+/* ===== Documents divers ===== */
+.doc-search{display:flex; gap:10px; flex-wrap:wrap; align-items:end; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:14px;}
+.doc-search > div{flex:1 1 220px; min-width:0;}
+.doc-search label{margin:0 0 4px;}
+.doc-search input,.doc-search select{margin:0; width:100%; box-sizing:border-box;}
+.doc-title{font-weight:700; font-size:1rem; word-break:break-word;}
 </style>
 </head>
 <body>
@@ -303,6 +309,7 @@ main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
     <div class="tab" data-tab="depenses">Dépenses</div>
     <div class="tab" data-tab="schemas">Schémas</div>
     <div class="tab" data-tab="factures">Factures</div>
+    <div class="tab" data-tab="docs">Documents divers</div>
   </div>
 </header>
 
@@ -381,7 +388,41 @@ main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
     </div>
     <div id="factList"></div>
   </section>
+
+  <!-- DOCUMENTS DIVERS -->
+  <section class="section" id="sec-docs">
+    <button class="add-btn" onclick="openDocModal()">+ Ajouter un document</button>
+    <div class="doc-search" id="docSearch">
+      <div><label>🔍 Rechercher</label><input id="dsTxt" type="search" placeholder="Titre, notes, nom du fichier…" oninput="renderDocs()"></div>
+      <div><label>Catégorie</label><select id="dsCat" onchange="renderDocs()"></select></div>
+    </div>
+    <div id="docList"></div>
+  </section>
 </main>
+
+<!-- MODAL DOCUMENT -->
+<div class="overlay" id="ovDoc">
+  <div class="modal">
+    <h2 id="docModalTitle">Nouveau document</h2>
+    <input type="hidden" id="docId">
+    <label>Titre</label><input id="docTitre" placeholder="Ex : Acte de francisation, attestation d'assurance 2026…">
+    <label>Catégorie</label>
+    <input type="hidden" id="docCat">
+    <div class="cat-picker" id="docCatPicker"></div>
+    <label>Date du document (facultatif)</label><input id="docDate" type="date">
+    <label>Document (photo ou PDF)</label>
+    <div class="notice-box">
+      <div id="docFileList"></div>
+      <button type="button" class="ghost small" onclick="document.getElementById('docFileInput').click()">📎 Joindre depuis Fichiers ou Photos</button>
+      <input type="file" id="docFileInput" accept="application/pdf,.pdf,image/*" multiple style="display:none" onchange="addNoticeFiles(event)">
+    </div>
+    <label>Notes</label><textarea id="docNotes"></textarea>
+    <div class="modal-actions">
+      <button class="ghost" onclick="cancelDocModal()">Annuler</button>
+      <button onclick="saveDoc()">Enregistrer</button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL FACTURE -->
 <div class="overlay" id="ovFact">
@@ -697,7 +738,7 @@ main:has(#sec-equip.active), main:has(#sec-factures.active){max-width:none;}
 </div>
 
 <script>
-let state = {equipements:[], depenses:[], travaux:[], schemas:[], factures:[], customFactEqs:[], customEqCats:[], customSchemaCats:[], customDepCats:[]};
+let state = {equipements:[], depenses:[], travaux:[], schemas:[], factures:[], documents:[], customFactEqs:[], customEqCats:[], customSchemaCats:[], customDepCats:[], customDocCats:[]};
 
 function load(){
   try{
@@ -712,7 +753,7 @@ function load(){
   if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
   if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
   if(!Array.isArray(state.memos)) state.memos = [];
-  if(!Array.isArray(state.factures)) state.factures = []; if(!Array.isArray(state.customFactEqs)) state.customFactEqs = [];
+  if(!Array.isArray(state.factures)) state.factures = []; if(!Array.isArray(state.customFactEqs)) state.customFactEqs = []; if(!Array.isArray(state.documents)) state.documents = []; if(!Array.isArray(state.customDocCats)) state.customDocCats = [];
   state.travaux.forEach(t=>{ if(!Array.isArray(t.achats)) t.achats = []; });
   state.equipements.forEach(eq=>{ if(!Array.isArray(eq.achats)) eq.achats = []; if(!Array.isArray(eq.entretiens)) eq.entretiens = []; eq.open = false;
     eq.entretiens.forEach(en=>{ if(en.notes && String(en.notes).trim()){ en.desc = (en.desc||'') + '\n\n' + String(en.notes).trim(); } delete en.notes; });
@@ -811,7 +852,7 @@ function removeFormNotice(i){
 
 let _curNotice = null; // {blob,url,nom}
 async function openNotice(eqId, nId){
-  const eq = state.equipements.find(e=>e.id===eqId) || (state.factures||[]).find(f=>f.id===eqId);
+  const eq = state.equipements.find(e=>e.id===eqId) || (state.factures||[]).find(f=>f.id===eqId) || (state.documents||[]).find(d=>d.id===eqId);
   const meta = (eq?.notices||[]).find(n=>n.id===nId);
   let blob;
   try{ blob = await noticeGet(nId); }catch(e){}
@@ -843,7 +884,7 @@ async function relinkNotice(ev){
   forgetThumb(_relink.nId);
   if(_relink.meta){ _relink.meta.nom = f.name; _relink.meta.type = f.type || _relink.meta.type; _relink.meta.taille = f.size; save(); }
   closeModal('ovRelink'); _relink = null;
-  renderEquip(); try{ renderSchemas(); renderFactures(); }catch(e){}
+  renderEquip(); try{ renderSchemas(); renderFactures(); renderDocs(); }catch(e){}
   toast('Fichier rattaché ✓');
 }
 /* ===== Affichage PDF toutes pages (pdf.js) ===== */
@@ -1201,8 +1242,8 @@ document.addEventListener('click', function(e){
   const picker = chip.closest('.cat-picker');
   if(!picker) return;
   const pickerId = picker.id;
-  const hiddenId = pickerId==='eqCatPicker' ? 'eqCat' : pickerId==='schemaCatPicker' ? 'schemaCat' : pickerId==='factCatPicker' ? 'factCat' : 'depCat';
-  const target = pickerId==='eqCatPicker' ? 'eq' : pickerId==='schemaCatPicker' ? 'schema' : pickerId==='factCatPicker' ? 'fact' : 'dep';
+  const hiddenId = pickerId==='eqCatPicker' ? 'eqCat' : pickerId==='schemaCatPicker' ? 'schemaCat' : pickerId==='factCatPicker' ? 'factCat' : pickerId==='docCatPicker' ? 'docCat' : 'depCat';
+  const target = pickerId==='eqCatPicker' ? 'eq' : pickerId==='schemaCatPicker' ? 'schema' : pickerId==='factCatPicker' ? 'fact' : pickerId==='docCatPicker' ? 'doc' : 'dep';
   if(chip.classList.contains('perso')){
     openCatPersoModal(target);
     return;
@@ -1513,6 +1554,7 @@ function allNoticeIds(){
   state.equipements.forEach(eq=>(eq.notices||[]).forEach(n=>ids.push(n.id)));
   state.schemas.forEach(sc=>{ if(sc.pdf && sc.pdf.id) ids.push(sc.pdf.id); });
   (state.factures||[]).forEach(f=>(f.notices||[]).forEach(n=>ids.push(n.id)));
+  (state.documents||[]).forEach(d=>(d.notices||[]).forEach(n=>ids.push(n.id)));
   return ids;
 }
 function blobToDataURL(b){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(b); }); }
@@ -1562,16 +1604,16 @@ function importData(event){
       if(!Array.isArray(state.customSchemaCats)) state.customSchemaCats = [];
       if(!Array.isArray(state.customDepCats)) state.customDepCats = [];
       if(!Array.isArray(state.memos)) state.memos = [];
-      if(!Array.isArray(state.factures)) state.factures = []; if(!Array.isArray(state.customFactEqs)) state.customFactEqs = [];
+      if(!Array.isArray(state.factures)) state.factures = []; if(!Array.isArray(state.customFactEqs)) state.customFactEqs = []; if(!Array.isArray(state.documents)) state.documents = []; if(!Array.isArray(state.customDocCats)) state.customDocCats = [];
       save();
       populateEqCatOptions(); populateSchemaCatOptions(); populateDepCatOptions();
-      renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos(); renderFactures(); applyColors();
+      renderEquip(); renderDepEquipOptions(); renderDep(); renderEcheances(); renderTravaux(); renderSchemas(); renderMemos(); renderFactures(); renderDocs(); applyColors();
       const ids = Object.keys(fichiers);
       document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi.'+(ids.length? ' Restauration des photos et notices…':'')+'</span>';
       (async ()=>{
         let ok = 0;
         for(const id of ids){ try{ await noticePut(id, await dataURLToBlob(fichiers[id].data)); forgetThumb(id); ok++; }catch(e){} }
-        if(ids.length){ renderEquip(); try{ renderSchemas(); renderFactures(); }catch(e){}
+        if(ids.length){ renderEquip(); try{ renderSchemas(); renderFactures(); renderDocs(); }catch(e){}
           document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi : '+ok+' photo(s)/notice(s) restaurée(s).</span>'; }
       })();
     }catch(err){
@@ -1620,6 +1662,7 @@ function openCatPersoModal(target){
   document.getElementById('catPersoTitle').textContent = fe? 'Étiquette personnalisée' : 'Catégorie personnalisée';
   document.getElementById('catPersoLabel').textContent = fe? "Nom de l'étiquette" : 'Nom de la catégorie';
   document.getElementById('catPersoInput').placeholder = fe? 'Ex : Annexe, Hors-bord, Place de port…' : 'Ex : Domotique';
+  if(target==='doc') document.getElementById('catPersoInput').placeholder = 'Ex : Douane, Permis, Club…';
   document.getElementById('catPersoInput').value = '';
   document.getElementById('ovCatPerso').classList.add('open');
   setTimeout(()=>document.getElementById('catPersoInput').focus(), 60);
@@ -1648,6 +1691,10 @@ function confirmCatPerso(){
     if(!EQUIP_CATS_FIXES.includes(val) && !state.customEqCats.includes(val)) state.customEqCats.push(val);
     save();
     renderCatPicker('factCatPicker','factCat',EQUIP_CATS_FIXES,state.customEqCats,val);
+  } else if(_catPersoTarget==='doc'){
+    if(!DOC_CATS_FIXES.includes(val) && !state.customDocCats.includes(val)) state.customDocCats.push(val);
+    save();
+    renderCatPicker('docCatPicker','docCat',DOC_CATS_FIXES,state.customDocCats,val);
   } else if(_catPersoTarget==='dep'){
     if(!DEP_CATS_FIXES.includes(val) && !state.customDepCats.includes(val)) state.customDepCats.push(val);
     save();
@@ -2488,6 +2535,101 @@ function renderFactCard(f){
   </div>`;
 }
 
+// ---- DOCUMENTS DIVERS ----
+const DOC_CATS_FIXES = ['Papiers du bateau','Assurance','Port / Amarrage','Navigation','Sécurité','Divers'];
+function docCats(){ return DOC_CATS_FIXES.concat((state.customDocCats||[]).slice().sort((a,b)=>a.localeCompare(b,'fr'))); }
+function openDocModal(id){
+  const d = id? state.documents.find(x=>x.id===id) : null;
+  document.getElementById('docModalTitle').textContent = id? 'Modifier le document' : 'Nouveau document';
+  document.getElementById('docId').value = id||'';
+  document.getElementById('docTitre').value = d?.titre||'';
+  document.getElementById('docDate').value = d?.date||'';
+  document.getElementById('docNotes').value = d?.notes||'';
+  const filtre = document.getElementById('dsCat').value;
+  const cat = d?.categorie || filtre || DOC_CATS_FIXES[0];
+  if(!docCats().includes(cat)) state.customDocCats.push(cat);
+  renderCatPicker('docCatPicker','docCat',DOC_CATS_FIXES,state.customDocCats,cat);
+  _noticeListEl = 'docFileList';
+  _formNotices = (d?.notices||[]).map(n=>({...n})); _formNoticesRemoved = [];
+  renderFormNotices();
+  document.getElementById('ovDoc').classList.add('open');
+}
+function cancelDocModal(){
+  _formNotices.filter(n=>n._new).forEach(n=>noticeDel(n.id));
+  _formNotices=[]; _formNoticesRemoved=[];
+  closeModal('ovDoc');
+}
+function saveDoc(){
+  const id = document.getElementById('docId').value;
+  let titre = document.getElementById('docTitre').value.trim();
+  // Sans titre, on reprend le nom du premier fichier joint
+  if(!titre && _formNotices.length) titre = _formNotices[0].nom.replace(/\.[a-z0-9]+$/i,'');
+  if(!titre){ alert('Indiquez un titre ou joignez un fichier.'); return; }
+  const data = {
+    titre,
+    categorie: document.getElementById('docCat').value || DOC_CATS_FIXES[0],
+    date: document.getElementById('docDate').value,
+    notes: document.getElementById('docNotes').value.trim(),
+    notices: _formNotices.map(({_new,...n})=>n)
+  };
+  if(id) Object.assign(state.documents.find(x=>x.id===id), data);
+  else state.documents.push({id:uid(), ...data});
+  _formNoticesRemoved.forEach(noticeDel);
+  _formNotices=[]; _formNoticesRemoved=[];
+  save(); closeModal('ovDoc'); renderDocs();
+  toast('Document enregistré ✓');
+}
+function deleteDoc(id){
+  if(!confirm('Supprimer ce document et ses fichiers ?')) return;
+  const d = state.documents.find(x=>x.id===id);
+  (d?.notices||[]).forEach(n=>noticeDel(n.id));
+  state.documents = state.documents.filter(x=>x.id!==id);
+  save(); renderDocs();
+}
+function docJump(i){
+  const el = document.getElementById('doccat-'+i); if(!el) return;
+  const h = document.querySelector('header')?.offsetHeight || 0;
+  window.scrollTo({top: el.getBoundingClientRect().top + window.scrollY - h - 10, behavior:'smooth'});
+}
+function renderDocs(){
+  const box = document.getElementById('docList'); if(!box) return;
+  const selCat = document.getElementById('dsCat');
+  const curCat = selCat.value;
+  const cats = docCats().concat(state.documents.map(d=>d.categorie)).filter((c,i,a)=>c && a.indexOf(c)===i);
+  selCat.innerHTML = '<option value="">Toutes</option>' + cats.map(c=>'<option'+(c===curCat?' selected':'')+'>'+escNotice(c)+'</option>').join('');
+  document.getElementById('docSearch').style.display = state.documents.length ? '' : 'none';
+  if(!state.documents.length){ box.innerHTML = '<div class="empty">Aucun document enregistré.<br>Rangez ici les papiers du bateau, l\'assurance, le contrat de port… en photo ou PDF.</div>'; return; }
+  const norm = t=>String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const txt = norm(document.getElementById('dsTxt').value.trim());
+  const liste = state.documents.filter(d=>{
+    if(curCat && d.categorie!==curCat) return false;
+    if(txt && !norm([d.titre,d.notes,(d.notices||[]).map(n=>n.nom).join(' ')].join(' ')).includes(txt)) return false;
+    return true;
+  });
+  if(!liste.length){ box.innerHTML = '<div class="empty">Aucun document ne correspond à cette recherche.</div>'; return; }
+  const groupes = cats.map(cat=>({cat, items: liste.filter(d=>d.categorie===cat).sort((a,b)=>a.titre.localeCompare(b.titre,'fr'))})).filter(g=>g.items.length);
+  const jump = groupes.length > 1 ? '<div class="eq-jump">' + groupes.map((g,i)=>
+    `<button class="cat-chip" onclick="docJump(${i})">${escNotice(g.cat)}<b>${g.items.length}</b></button>`).join('') + '</div>' : '';
+  box.innerHTML = jump + '<div class="eq-columns">' + groupes.map((g,i)=>`
+    <div class="eq-column" id="doccat-${i}">
+      <div class="eq-column-title">${escNotice(g.cat)} (${g.items.length})</div>
+      ${g.items.map(renderDocCard).join('')}
+    </div>`).join('') + '</div>';
+  hydrateThumbs(box);
+}
+function renderDocCard(d){
+  const imgs = (d.notices||[]).filter(isImgNotice), docs = (d.notices||[]).filter(n=>!isImgNotice(n));
+  return `<div class="card fact-card">
+    <div class="doc-title">${escNotice(d.titre)}</div>
+    ${d.date? '<div class="fact-meta">'+fmtDate(d.date)+'</div>':''}
+    ${imgs.length? '<div class="notice-thumbs">'+imgs.map(n=>'<button class="nthumb" onclick="openNotice(\''+d.id+'\',\''+n.id+'\')"><img data-nid="'+n.id+'" alt="" loading="lazy"></button>').join('')+'</div>':''}
+    ${docs.length? '<div class="notice-btns">'+docs.map(n=>'<button class="small" onclick="openNotice(\''+d.id+'\',\''+n.id+'\')">📄 '+escNotice(n.nom.replace(/\.pdf$/i,''))+'</button>').join('')+'</div>':''}
+    ${!imgs.length && !docs.length? '<div class="fact-meta">Aucun fichier joint</div>':''}
+    ${d.notes? '<div class="fact-meta" style="white-space:pre-wrap">'+escNotice(d.notes)+'</div>':''}
+    <div class="fact-actions"><button class="icon" onclick="openDocModal('${d.id}')" aria-label="Modifier">✏️</button><button class="icon" onclick="deleteDoc('${d.id}')" aria-label="Supprimer">🗑</button></div>
+  </div>`;
+}
+
 // ---- INIT ----
 load(); try{ applyColors(); }catch(e){ console.error('couleurs', e); }
 renderMemos();
@@ -2498,6 +2640,7 @@ renderEcheances();
 renderTravaux();
 renderSchemas();
 renderFactures();
+renderDocs();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
