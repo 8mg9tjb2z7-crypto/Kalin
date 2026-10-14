@@ -177,8 +177,12 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
   color:var(--accent); padding-bottom:8px; margin-bottom:10px; border-bottom:2px solid var(--accent);
 }
 .schema-column-item{margin-bottom:12px;}
-.eq-columns{display:flex; gap:16px; align-items:flex-start; overflow-x:auto; padding-bottom:10px; -webkit-overflow-scrolling:touch;}
-.eq-column{flex:0 0 320px; width:320px;}
+/* Catégories en grille qui passe à la ligne : plus de défilement horizontal */
+.eq-columns{display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:22px 16px; align-items:start; padding-bottom:10px;}
+.eq-column{min-width:0; scroll-margin-top:12px;}
+.eq-jump{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px;}
+.eq-jump .cat-chip{font-size:0.8rem; padding:5px 12px;}
+.eq-jump .cat-chip b{color:var(--accent); font-weight:700; margin-left:3px;}
 .eq-column-title{
   font-weight:700; text-transform:uppercase; font-size:0.78rem; letter-spacing:.03em;
   color:var(--accent); padding-bottom:8px; margin-bottom:10px; border-bottom:2px solid var(--accent);
@@ -1754,13 +1758,23 @@ function renderEquip(){
   const orphelins = state.equipements.filter(e=>!catsConnues.includes(e.categorie)).sort((a,b)=>a.nom.localeCompare(b.nom,'fr'));
   if(orphelins.length) groupes.push({cat: orphelins[0].categorie || 'Autre', items: orphelins});
 
-  box.innerHTML = '<div class="eq-columns">' + groupes.map(g=>`
-    <div class="eq-column">
+  // Raccourcis vers chaque catégorie (utile quand la liste devient longue)
+  const jump = groupes.length > 1 ? '<div class="eq-jump">' + groupes.map((g,i)=>
+    `<button class="cat-chip" onclick="eqJump(${i})">${g.cat}<b>${g.items.length}</b></button>`
+  ).join('') + '</div>' : '';
+
+  box.innerHTML = jump + '<div class="eq-columns">' + groupes.map((g,i)=>`
+    <div class="eq-column" id="eqcat-${i}">
       <div class="eq-column-title">${g.cat} (${g.items.length})</div>
       ${g.items.map(eq=>renderEquipCard(eq)).join('')}
     </div>
   `).join('') + '</div>';
   hydrateThumbs(box);
+}
+function eqJump(i){
+  const el = document.getElementById('eqcat-'+i); if(!el) return;
+  const h = document.querySelector('header')?.offsetHeight || 0;
+  window.scrollTo({top: el.getBoundingClientRect().top + window.scrollY - h - 10, behavior:'smooth'});
 }
 function renderEquipCard(eq){
     const entretiensHtml = (eq.entretiens||[]).map(ent=>{
