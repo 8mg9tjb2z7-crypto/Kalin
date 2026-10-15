@@ -122,6 +122,7 @@ a.notice-link{color:var(--accent); text-decoration:none; font-weight:600;}
 .notice-file .nf-name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;}
 .notice-btns{display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 6px;}
 .notice-btns button{font-size:0.8rem; padding:6px 10px;}
+.notice-btns a.notice-web{display:inline-block; font-family:inherit; border-radius:10px; font-weight:600; background:var(--accent); color:#fff; text-decoration:none; font-size:0.8rem; padding:6px 10px;}
 .notice-thumbs{display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;}
 .nthumb{position:relative; width:72px; height:72px; border-radius:10px; overflow:hidden; border:1px solid var(--border); background:var(--bg); padding:0; cursor:pointer; flex:none;}
 .nthumb img{width:100%; height:100%; object-fit:cover; display:block;}
@@ -486,6 +487,7 @@ main:has(#sec-equip.active), main:has(#sec-factures.active), main:has(#sec-docs.
       <input type="file" id="eqNoticeFile" accept="application/pdf,.pdf,image/*" multiple style="display:none" onchange="addNoticeFiles(event)">
     </div>
     <label>Lien notice web (facultatif)</label><input id="eqNotice" placeholder="https://…">
+    <label>Libellé du bouton du lien</label><input id="eqNoticeLabel" placeholder="Notice en ligne">
     <label>Notes</label><textarea id="eqNotes"></textarea>
     <div class="modal-actions">
       <button class="ghost" onclick="cancelEquipModal()">Annuler</button>
@@ -1726,6 +1728,7 @@ function openEquipModal(id){
   document.getElementById('eqDateAchatInconnue').checked = inconnue;
   toggleEqDateInconnue();
   document.getElementById('eqNotice').value = eq?.notice||'';
+  document.getElementById('eqNoticeLabel').value = eq?.noticeLabel||'';
   _formNotices = (eq?.notices||[]).map(n=>({...n}));
   _formNoticesRemoved = []; _noticeListEl = 'eqNoticeList';
   renderFormNotices();
@@ -1756,6 +1759,7 @@ function saveEquip(){
     serie:document.getElementById('eqSerie').value.trim(),
     dateAchat: dateInconnue ? 'inconnue' : document.getElementById('eqDateAchat').value,
     notice:document.getElementById('eqNotice').value.trim(),
+    noticeLabel:document.getElementById('eqNoticeLabel').value.trim(),
     notices:_formNotices.map(({_new,...n})=>n),
     notes:document.getElementById('eqNotes').value.trim()
   };
@@ -1871,8 +1875,7 @@ function renderEquipCard(eq){
         <div class="meta">
           ${eq.dateAchat==='inconnue'? "Date d'achat inconnue<br>" : (eq.dateAchat? "Acheté le "+fmtDate(eq.dateAchat)+"<br>":"")}
           ${(eq.notices||[]).some(isImgNotice)? '<div class="notice-thumbs">'+eq.notices.filter(isImgNotice).map(n=>'<button class="nthumb" onclick="event.stopPropagation();openNotice(\''+eq.id+'\',\''+n.id+'\')"><img data-nid="'+n.id+'" alt="" loading="lazy"></button>').join('')+'</div>':''}
-          ${(eq.notices||[]).some(n=>!isImgNotice(n))? '<div class="notice-btns">'+eq.notices.filter(n=>!isImgNotice(n)).map(n=>'<button class="small" onclick="event.stopPropagation();openNotice(\''+eq.id+'\',\''+n.id+'\')">📄 '+escNotice(n.nom.replace(/\.pdf$/i,''))+'</button>').join('')+'</div>':''}
-          ${eq.notice? '<a class="notice-link" href="'+eq.notice+'" target="_blank" rel="noopener">🌐 Notice en ligne</a><br>':''}
+          ${((eq.notices||[]).some(n=>!isImgNotice(n)) || eq.notice)? '<div class="notice-btns">'+(eq.notices||[]).filter(n=>!isImgNotice(n)).map(n=>'<button class="small" onclick="event.stopPropagation();openNotice(\''+eq.id+'\',\''+n.id+'\')">📄 '+escNotice(n.nom.replace(/\.pdf$/i,''))+'</button>').join('')+(eq.notice? '<a class="notice-web" href="'+escNotice(eq.notice)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 '+escNotice(eq.noticeLabel||'Notice en ligne')+'</a>':'')+'</div>':''}
           ${eq.notes? eq.notes:''}
         </div>
         <div class="row"><button class="ghost small" onclick="openEquipModal('${eq.id}')">Modifier la fiche</button><button class="ghost small" onclick="deleteEquip('${eq.id}')">Supprimer</button></div>
