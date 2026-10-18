@@ -589,8 +589,21 @@ main:has(#sec-equip.active), main:has(#sec-factures.active), main:has(#sec-docs.
     <label>Statut</label>
     <select id="travStatut"><option value="à faire">À faire</option><option value="en cours">En cours</option><option value="terminé">Terminé</option></select>
     <label>Coût estimé (€)</label><input type="number" id="travCout" min="0" step="0.01">
+    <label>Documents (photos ou PDF, stockés dans l'appli)</label>
+    <div class="notice-box">
+      <div id="travFileList"></div>
+      <button type="button" class="ghost small" onclick="document.getElementById('travFileInput').click()">📎 Joindre depuis Fichiers ou Photos</button>
+      <input type="file" id="travFileInput" accept="application/pdf,.pdf,image/*" multiple style="display:none" onchange="addNoticeFiles(event)">
+    </div>
+    <label>Liens internet</label>
+    <div class="notice-box">
+      <div id="travLienList"></div>
+      <input id="travLienUrl" type="url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://…">
+      <input id="travLienLabel" placeholder="Libellé (facultatif) — ex : Tuto étanchéité" style="margin-top:6px">
+      <button type="button" class="ghost small" style="margin-top:6px" onclick="addTravLien()">🔗 Ajouter le lien</button>
+    </div>
     <div class="modal-actions">
-      <button class="ghost" onclick="closeModal('ovTravail')">Annuler</button>
+      <button class="ghost" onclick="cancelTravailModal()">Annuler</button>
       <button onclick="saveTravail()">Enregistrer</button>
     </div>
   </div>
@@ -854,7 +867,7 @@ function removeFormNotice(i){
 
 let _curNotice = null; // {blob,url,nom}
 async function openNotice(eqId, nId){
-  const eq = state.equipements.find(e=>e.id===eqId) || (state.factures||[]).find(f=>f.id===eqId) || (state.documents||[]).find(d=>d.id===eqId);
+  const eq = state.equipements.find(e=>e.id===eqId) || (state.factures||[]).find(f=>f.id===eqId) || (state.documents||[]).find(d=>d.id===eqId) || (state.travaux||[]).find(t=>t.id===eqId);
   const meta = (eq?.notices||[]).find(n=>n.id===nId);
   let blob;
   try{ blob = await noticeGet(nId); }catch(e){}
@@ -886,7 +899,7 @@ async function relinkNotice(ev){
   forgetThumb(_relink.nId);
   if(_relink.meta){ _relink.meta.nom = f.name; _relink.meta.type = f.type || _relink.meta.type; _relink.meta.taille = f.size; save(); }
   closeModal('ovRelink'); _relink = null;
-  renderEquip(); try{ renderSchemas(); renderFactures(); renderDocs(); }catch(e){}
+  renderEquip(); try{ renderSchemas(); renderFactures(); renderDocs(); renderTravaux(); }catch(e){}
   toast('Fichier rattaché ✓');
 }
 /* ===== Affichage PDF toutes pages (pdf.js) ===== */
@@ -1068,23 +1081,73 @@ function openTravailModal(id){
   document.getElementById('travDesc').value = t?.desc||'';
   document.getElementById('travStatut').value = t?.statut||'à faire';
   document.getElementById('travCout').value = t?.cout||'';
+  _noticeListEl = 'travFileList';
+  _formNotices = (t?.notices||[]).map(n=>({...n})); _formNoticesRemoved = [];
+  renderFormNotices();
+  _formLiens = (t?.liens||[]).map(l=>({...l}));
+  document.getElementById('travLienUrl').value = '';
+  document.getElementById('travLienLabel').value = '';
+  renderTravLiens();
   document.getElementById('ovTravail').classList.add('open');
+}
+let _formLiens = [];
+function normUrl(u){
+  u = (u||'').trim();
+  if(!u) return '';
+  if(!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://'+u;
+  return /^https?:\/\//i.test(u) ? u : '';
+}
+function lienLabel(l){
+  if(l.label) return l.label;
+  try{ return new URL(l.url).hostname.replace(/^www\./,''); }catch(e){ return l.url; }
+}
+function addTravLien(){
+  const urlEl = document.getElementById('travLienUrl'), labEl = document.getElementById('travLienLabel');
+  const url = normUrl(urlEl.value);
+  if(!url){ alert('Saisissez une adresse internet valide (ex : https://…)'); return; }
+  _formLiens.push({id:'l_'+uid(), url, label:labEl.value.trim()});
+  urlEl.value=''; labEl.value='';
+  renderTravLiens();
+}
+function removeTravLien(i){ _formLiens.splice(i,1); renderTravLiens(); }
+function renderTravLiens(){
+  const el = document.getElementById('travLienList');
+  el.innerHTML = _formLiens.map((l,i)=>`<div class="notice-file">
+      <span class="nf-name">🌐 ${escNotice(lienLabel(l))} <span style="color:var(--sub);font-size:.75rem">${escNotice(l.url)}</span></span>
+      <button type="button" class="icon" onclick="removeTravLien(${i})">🗑</button>
+    </div>`).join('') || '<div style="font-size:.8rem;color:var(--sub);margin-bottom:6px">Aucun lien</div>';
+}
+function cancelTravailModal(){
+  _formNotices.filter(n=>n._new).forEach(n=>noticeDel(n.id));
+  _formNotices=[]; _formNoticesRemoved=[]; _formLiens=[];
+  closeModal('ovTravail');
 }
 function saveTravail(){
   const id = document.getElementById('travId').value;
   const titre = document.getElementById('travTitre').value.trim();
   if(!titre){ alert('Le titre est requis'); return; }
+  // Lien saisi mais pas encore ajouté : on l'ajoute automatiquement
+  if(document.getElementById('travLienUrl').value.trim()){
+    const url = normUrl(document.getElementById('travLienUrl').value);
+    if(!url){ alert('Le lien saisi n\'est pas une adresse internet valide.'); return; }
+    _formLiens.push({id:'l_'+uid(), url, label:document.getElementById('travLienLabel').value.trim()});
+  }
   const data = {
     titre, desc:document.getElementById('travDesc').value.trim(),
     statut:document.getElementById('travStatut').value,
-    cout:Number(document.getElementById('travCout').value)||0
+    cout:Number(document.getElementById('travCout').value)||0,
+    notices:_formNotices.map(({_new,...n})=>n),
+    liens:_formLiens.map(l=>({...l}))
   };
   if(id) Object.assign(state.travaux.find(x=>x.id===id), data);
   else state.travaux.push({id:uid(), achats:[], open:true, ...data});
+  _formNoticesRemoved.forEach(noticeDel);
+  _formNotices=[]; _formNoticesRemoved=[]; _formLiens=[];
   save(); closeModal('ovTravail'); renderTravaux(); renderDep();
 }
 function deleteTravail(id){
-  if(!confirm('Supprimer ce travail et sa liste de pièces ?')) return;
+  if(!confirm('Supprimer ce travail, sa liste de pièces et ses documents joints ?')) return;
+  (state.travaux.find(x=>x.id===id)?.notices||[]).forEach(n=>noticeDel(n.id));
   state.travaux = state.travaux.filter(x=>x.id!==id);
   save(); renderTravaux(); renderDep();
 }
@@ -1137,6 +1200,16 @@ function renderTravaux(){
       </div>
       <div class="eq-body ${t.open?'open':''}">
         ${t.desc? '<div class="meta">'+t.desc+'</div>':''}
+        ${(()=>{
+          const imgs = (t.notices||[]).filter(isImgNotice), docs = (t.notices||[]).filter(n=>!isImgNotice(n)), liens = t.liens||[];
+          let h = '';
+          if(imgs.length) h += '<div class="notice-thumbs">'+imgs.map(n=>'<button class="nthumb" onclick="openNotice(\''+t.id+'\',\''+n.id+'\')"><img data-nid="'+n.id+'" alt="" loading="lazy"></button>').join('')+'</div>';
+          if(docs.length || liens.length) h += '<div class="notice-btns">'
+            + docs.map(n=>'<button class="small" onclick="openNotice(\''+t.id+'\',\''+n.id+'\')">📄 '+escNotice(n.nom.replace(/\.pdf$/i,''))+'</button>').join('')
+            + liens.map(l=>'<a class="notice-web" href="'+escNotice(l.url)+'" target="_blank" rel="noopener">🌐 '+escNotice(lienLabel(l))+'</a>').join('')
+            + '</div>';
+          return h;
+        })()}
         <div class="row" style="margin-top:8px">
           <button class="ghost small" onclick="openTravailModal('${t.id}')">Modifier</button>
           <button class="ghost small" onclick="deleteTravail('${t.id}')">Supprimer</button>
@@ -1148,6 +1221,7 @@ function renderTravaux(){
       </div>
     </div>`;
   }).join('');
+  hydrateThumbs(box);
 }
 
 // ---- SCHEMAS ----
@@ -1557,6 +1631,7 @@ function allNoticeIds(){
   state.schemas.forEach(sc=>{ if(sc.pdf && sc.pdf.id) ids.push(sc.pdf.id); });
   (state.factures||[]).forEach(f=>(f.notices||[]).forEach(n=>ids.push(n.id)));
   (state.documents||[]).forEach(d=>(d.notices||[]).forEach(n=>ids.push(n.id)));
+  (state.travaux||[]).forEach(t=>(t.notices||[]).forEach(n=>ids.push(n.id)));
   return ids;
 }
 function blobToDataURL(b){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(b); }); }
@@ -1615,7 +1690,7 @@ function importData(event){
       (async ()=>{
         let ok = 0;
         for(const id of ids){ try{ await noticePut(id, await dataURLToBlob(fichiers[id].data)); forgetThumb(id); ok++; }catch(e){} }
-        if(ids.length){ renderEquip(); try{ renderSchemas(); renderFactures(); renderDocs(); }catch(e){}
+        if(ids.length){ renderEquip(); try{ renderSchemas(); renderFactures(); renderDocs(); renderTravaux(); }catch(e){}
           document.getElementById('importMsg').innerHTML = '<span style="color:var(--ok)">Import réussi : '+ok+' photo(s)/notice(s) restaurée(s).</span>'; }
       })();
     }catch(err){
