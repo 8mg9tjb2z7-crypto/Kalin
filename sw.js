@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kalin-cache-v17';
+const CACHE_NAME = 'kalin-cache-v18';
 const ASSETS = [
   './',
   './index.html',
@@ -16,7 +16,9 @@ const PDFJS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) =>
-      cache.addAll(ASSETS).then(() =>
+      // cache: 'reload' : on force le téléchargement de la version la plus récente
+      // (et non une ancienne copie gardée par le navigateur)
+      cache.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' }))).then(() =>
         Promise.all(PDFJS.map((u) =>
           fetch(u, { mode: 'cors' }).then((r) => { if (r.ok) return cache.put(u, r); }).catch(() => {})
         ))
@@ -41,26 +43,42 @@ self.addEventListener('fetch', (event) => {
   if (isPage) {
     // Page HTML : toujours essayer le réseau en premier (pour avoir les mises à jour),
     // et retomber sur le cache seulement si hors-ligne.
+    // À chaque ouverture en ligne, la copie hors connexion est remplacée par la version
+    // la plus récente (sous les deux adresses de l'app), et on attend que ce soit bien
+    // enregistré : ainsi, hors connexion, c'est toujours la dernière version qui s'ouvre.
     event.respondWith(
       fetch(event.request, { cache: 'no-cache' })
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          if (response && response.ok) {
+            const c1 = response.clone(), c2 = response.clone();
+            event.waitUntil(
+              caches.open(CACHE_NAME).then((cache) => Promise.all([
+                cache.put('./index.html', c1),
+                cache.put('./', c2)
+              ])).catch(() => {})
+            );
+          }
           return response;
         })
-        .catch(() => caches.match(event.request).then((c) => c || caches.match('./index.html')))
+        .catch(() =>
+          caches.match('./index.html', { ignoreSearch: true })
+            .then((c) => c || caches.match(event.request, { ignoreSearch: true }))
+            .then((c) => c || caches.match('./', { ignoreSearch: true }))
+        )
     );
     return;
   }
 
-  // Autres fichiers (icônes, manifest) : cache en premier, réseau en secours.
+  // Autres fichiers (icônes, manifest, lecteur PDF) : cache en premier, réseau en secours.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          if (response && response.ok) {
+            const copy = response.clone();
+            event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {}));
+          }
           return response;
         })
         .catch(() => caches.match('./index.html'));
