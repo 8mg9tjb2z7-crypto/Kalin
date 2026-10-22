@@ -714,6 +714,9 @@ main:has(#sec-equip.active), main:has(#sec-factures.active), main:has(#sec-docs.
     <div class="modal-actions">
       <button class="ghost" id="noticeViewFs" onclick="toggleNoticeFs()">⛶ Plein écran</button>
       <button class="ghost" id="noticeViewShare" onclick="shareCurrentNotice()">Partager / Ouvrir dans…</button>
+      <label class="ghost" id="noticeViewReplace" style="display:none;cursor:pointer;padding:10px 14px;border-radius:10px;border:1px solid var(--accent,#0f6e8c);color:var(--accent,#0f6e8c);font-weight:600;text-align:center">📝 Remplacer par la version annotée
+        <input type="file" id="noticeReplaceFile" accept="image/*,application/pdf,.pdf" style="display:none" onchange="replaceCurrentNotice(event)">
+      </label>
       <button onclick="closeNoticeView()">Fermer</button>
     </div>
   </div>
@@ -874,7 +877,7 @@ async function openNotice(eqId, nId){
   if(!blob){ askRelink(nId, meta, eq); return; }
   closeNoticeView();
   const url = URL.createObjectURL(blob);
-  _curNotice = {blob, url, nom: meta?.nom || 'notice.pdf'};
+  _curNotice = {blob, url, nom: meta?.nom || 'notice.pdf', nId, meta, reopen: ()=>openNotice(eqId, nId)};
   document.getElementById('noticeViewTitle').textContent = _curNotice.nom;
   const body = document.getElementById('noticeViewBody');
   const isImg = (blob.type||'').startsWith('image/') || isImgNotice(meta||{});
@@ -882,6 +885,7 @@ async function openNotice(eqId, nId){
   if(isImg) body.innerHTML = `<img src="${url}" alt="">`;
   else { body.innerHTML = '<div class="pdf-scroll" id="pdfScroll"><div class="pdf-msg">Ouverture de la notice…</div></div>'; showPdf(blob); }
   document.getElementById('noticeViewShare').style.display = (_dl || navigator.share) ? '' : 'none';
+  document.getElementById('noticeViewReplace').style.display = (_curNotice && _curNotice.nId) ? '' : 'none';
   document.getElementById('ovNoticeView').classList.add('open');
 }
 let _relink = null;
@@ -1051,6 +1055,20 @@ async function shareCurrentNotice(){
   }
   try{ await navigator.share({files:[new File([_curNotice.blob], nom, {type:_curNotice.blob.type||'application/pdf'})], title:nom}); }
   catch(e){ if(e && e.name!=='AbortError') toast("Partage impossible ici"); }
+}
+/* Remplacer le fichier ouvert par sa version annotée (enregistrée dans l'app Fichiers) */
+async function replaceCurrentNotice(ev){
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if(!f || !_curNotice || !_curNotice.nId) return;
+  const cur = _curNotice;
+  try{ await noticePut(cur.nId, f); }
+  catch(e){ alert("Impossible d'enregistrer ce fichier : espace de stockage insuffisant ?"); return; }
+  forgetThumb(cur.nId);
+  if(cur.meta){ cur.meta.nom = f.name; cur.meta.type = f.type || cur.meta.type; cur.meta.taille = f.size; save(); }
+  try{ renderEquip(); renderSchemas(); renderFactures(); renderDocs(); renderTravaux(); }catch(e){}
+  toast('Version annotée enregistrée ✓');
+  if(cur.reopen) cur.reopen();
 }
 let _toastTimer=null;
 function toast(msg){
@@ -1438,12 +1456,13 @@ async function openSchemaPdf(s){
   if(!blob){ askRelink(s.pdf.id, s.pdf, s); return; }
   closeNoticeView();
   const url = URL.createObjectURL(blob);
-  _curNotice = {blob, url, nom: s.pdf.nom || ((s.titre||'schema')+'.pdf')};
+  _curNotice = {blob, url, nom: s.pdf.nom || ((s.titre||'schema')+'.pdf'), nId: s.pdf.id, meta: s.pdf, reopen: ()=>openSchemaPdf(s)};
   document.getElementById('noticeViewTitle').textContent = s.titre || _curNotice.nom;
   document.getElementById('pdfTools').style.display = 'none';
   document.getElementById('noticeViewBody').innerHTML = '<div class="pdf-scroll" id="pdfScroll"><div class="pdf-msg">Ouverture du schéma…</div></div>';
   showPdf(blob);
   document.getElementById('noticeViewShare').style.display = (_dl || navigator.share) ? '' : 'none';
+  document.getElementById('noticeViewReplace').style.display = (_curNotice && _curNotice.nId) ? '' : 'none';
   document.getElementById('ovNoticeView').classList.add('open');
 }
 function closeSchemaEditor(){
