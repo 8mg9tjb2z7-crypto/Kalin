@@ -1568,13 +1568,129 @@ function buildPrintListArea(items){
       <tfoot><tr><td colspan="5">Total estimé</td><td class="pl-prix">${fmtEuro(total)}</td></tr></tfoot>
     </table>`;
 }
-function printListeAchat(){
+/* Impression de la liste d'achat : on fabrique un PDF (l'iPad n'affiche pas l'impression
+   d'une page web de plusieurs pages), qu'on ouvre dans la visionneuse.
+   Ensuite : « Partager / Ouvrir dans… » → Imprimer. */
+const PDFLIB_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+let _pdfLibMakeP = null;
+function loadPdfMaker(){
+  if(window.PDFLib) return Promise.resolve(window.PDFLib);
+  if(_pdfLibMakeP) return _pdfLibMakeP;
+  _pdfLibMakeP = new Promise((res,rej)=>{
+    const sc = document.createElement('script'); sc.src = PDFLIB_URL; sc.crossOrigin = 'anonymous';
+    sc.onload = ()=> window.PDFLib ? res(window.PDFLib) : rej(new Error('pdf-lib'));
+    sc.onerror = ()=>{ sc.remove(); _pdfLibMakeP = null; rej(new Error('pdf-lib')); };
+    document.head.appendChild(sc);
+  });
+  return _pdfLibMakeP;
+}
+window.addEventListener('load', ()=>{ setTimeout(()=>{ if(navigator.onLine) loadPdfMaker().catch(()=>{}); }, 4000); });
+// Les polices de base du PDF ne connaissent pas certains symboles : on les remplace
+function pdfTxt(t, font){
+  let s = String(t==null?'':t)
+    .replace(/≈/g,'env. ').replace(/[−‐‑]/g,'-').replace(/→/g,'->').replace(/←/g,'<-')
+    .replace(/≤/g,'<=').replace(/≥/g,'>=').replace(/[  \t\r\n]/g,' ').replace(/  +/g,' ').trim();
+  let out = '';
+  for(const ch of s){ try{ font.widthOfTextAtSize(ch, 10); out += ch; }catch(e){ out += '?'; } }
+  return out;
+}
+function pdfEuro(n){ return (Number(n)||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' €'; }
+// Coupe un texte en lignes qui tiennent dans la largeur w
+function pdfWrap(text, font, size, w){
+  const lines = []; let cur = '';
+  for(const word of String(text).split(' ')){
+    const t = cur ? cur+' '+word : word;
+    if(font.widthOfTextAtSize(t, size) <= w){ cur = t; continue; }
+    if(cur) lines.push(cur);
+    cur = word;
+    while(font.widthOfTextAtSize(cur, size) > w && cur.length > 1){
+      let k = cur.length - 1;
+      while(k > 1 && font.widthOfTextAtSize(cur.slice(0,k), size) > w) k--;
+      lines.push(cur.slice(0,k)); cur = cur.slice(k);
+    }
+  }
+  if(cur || !lines.length) lines.push(cur);
+  return lines;
+}
+async function printListeAchat(){
   const items = getAchatsAPrevoir();
-  buildPrintListArea(items);
-  // On ferme la fenêtre de la liste avant d'imprimer : sur iPad, une fenêtre ouverte
-  // par-dessus la page peut empêcher l'impression des pages suivantes
-  closeModal('ovListeAchat');
-  setTimeout(()=>window.print(), 300);
+  let L;
+  try{ L = await loadPdfMaker(); }
+  catch(e){ alert("Pour créer la première fois le PDF de la liste, Kalin a besoin d'internet. Connectez-vous une fois, puis réessayez : ensuite cela fonctionnera aussi hors connexion."); return; }
+  try{
+    const blob = await buildListeAchatPdf(L, items);
+    closeModal('ovListeAchat');
+    const today = new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+    showGeneratedPdf(blob, "Kalin - Liste d'achat "+today.replace(/\//g,'-')+'.pdf', "Liste d'achat");
+  }catch(e){ console.error(e); alert("Impossible de créer le PDF de la liste."); }
+}
+async function buildListeAchatPdf(L, items){
+  const mm = v => v*72/25.4;
+  const pdf = await L.PDFDocument.create();
+  const F = await pdf.embedFont(L.StandardFonts.Helvetica);
+  const FB = await pdf.embedFont(L.StandardFonts.HelveticaBold);
+  const black = L.rgb(0,0,0), grey = L.rgb(0.47,0.47,0.47), shade = L.rgb(0.88,0.88,0.88);
+  const PW = mm(297), PH = mm(210), M = mm(8), TOP = mm(10), BOT = mm(12);
+  const SZ = 12, HSZ = 11, LH = SZ*1.22, PAD = mm(1.8);
+  const cols = [mm(76), mm(28), mm(40), mm(62), mm(46)]; cols.push(PW - 2*M - cols.reduce((a,b)=>a+b,0));
+  const heads = ['Article','Marque','Référence','Origine',"Lieu d'achat",'Prix estimé'];
+  const today = new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const total = items.reduce((s,a)=>s+a.prix,0);
+  let page, y, nPage = 0;
+  function drawRow(cells, font, size, fill, alignRight){
+    const wrapped = cells.map((c,i)=>pdfWrap(c, font, size, cols[i]-2*PAD));
+    const h = Math.max(...wrapped.map(w=>w.length)) * size*1.22 + 2*PAD;
+    let x = M;
+    wrapped.forEach((lines,i)=>{
+      page.drawRectangle({x, y:y-h, width:cols[i], height:h, borderColor:grey, borderWidth:0.6, color:fill||undefined});
+      lines.forEach((ln,k)=>{
+        const ty = y - PAD - size*0.9 - k*size*1.22;
+        const tx = (alignRight && i===cells.length-1) ? x + cols[i] - PAD - font.widthOfTextAtSize(ln,size) : x + PAD;
+        page.drawText(ln, {x:tx, y:ty, size, font, color:black});
+      });
+      x += cols[i];
+    });
+    y -= h;
+  }
+  function rowHeight(cells, font, size){
+    return Math.max(...cells.map((c,i)=>pdfWrap(c, font, size, cols[i]-2*PAD).length)) * size*1.22 + 2*PAD;
+  }
+  function newPage(){
+    page = pdf.addPage([PW, PH]); nPage++;
+    y = PH - TOP;
+    if(nPage===1){
+      page.drawText(pdfTxt("Kalin - Liste d'achat", FB), {x:M, y:y-18, size:18, font:FB, color:black});
+      page.drawText(pdfTxt('Matériel à prévoir · '+items.length+' article'+(items.length>1?'s':'')+' · générée le '+today, F), {x:M, y:y-36, size:11, font:F, color:black});
+      y -= 46;
+    }
+    page.drawText('Page '+nPage, {x:PW-M-F.widthOfTextAtSize('Page '+nPage,10), y:mm(5), size:10, font:F, color:black});
+    drawRow(heads.map(h=>pdfTxt(h,FB)), FB, HSZ, shade, false);
+  }
+  newPage();
+  const rows = items.length ? items.map(a=>[a.article, a.marque||'-', a.ref||'-', a.origine, a.lieu||'-', pdfEuro(a.prix)].map(c=>pdfTxt(c,F)))
+                            : [[pdfTxt('Aucun article à acheter.',F),'','','','','']];
+  rows.forEach(r=>{
+    if(y - rowHeight(r, F, SZ) < BOT) newPage();
+    drawRow(r, F, SZ, null, true);
+  });
+  const foot = [pdfTxt('Total estimé',FB),'','','','',pdfTxt(pdfEuro(total),FB)];
+  if(y - rowHeight(foot, FB, SZ) < BOT) newPage();
+  drawRow(foot, FB, SZ, shade, true);
+  const bytes = await pdf.save();
+  return new Blob([bytes], {type:'application/pdf'});
+}
+function showGeneratedPdf(blob, nom, titre){
+  closeNoticeView();
+  const url = URL.createObjectURL(blob);
+  _curNotice = {blob, url, nom};
+  document.getElementById('noticeViewTitle').textContent = titre || nom;
+  document.getElementById('pdfTools').style.display = 'none';
+  document.getElementById('noticeViewBody').innerHTML = '<div class="pdf-scroll" id="pdfScroll"><div class="pdf-msg">Préparation du PDF…</div></div>';
+  showPdf(blob);
+  document.getElementById('noticeViewShare').style.display = (_dl || navigator.share) ? '' : 'none';
+  document.getElementById('noticeViewReplace').style.display = 'none';
+  document.getElementById('ovNoticeView').classList.add('open');
+  toast('Pour imprimer : Partager / Ouvrir dans… → Imprimer');
 }
 function exportListeAchatCSV(){
   const items = getAchatsAPrevoir();

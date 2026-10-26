@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kalin-cache-v20';
+const CACHE_NAME = 'kalin-cache-v21';
 const ASSETS = [
   './',
   './index.html',
@@ -10,7 +10,9 @@ const ASSETS = [
 // Lecteur PDF (pdf.js) : mis en cache pour lire les notices hors connexion
 const PDFJS = [
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  // Création du PDF de la liste d'achat (pdf-lib), pour l'imprimer même hors connexion
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'
 ];
 
 self.addEventListener('install', (event) => {
