@@ -108,6 +108,13 @@ input[type=date]{-webkit-appearance:none; appearance:none; display:block; min-he
 .summary .num{font-size:1.25rem; font-weight:700;}
 .summary .lbl{font-size:0.72rem; color:var(--sub); margin-top:2px;}
 .filters{display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;}
+.dep-cats{display:flex; gap:8px; flex-wrap:wrap; margin:0 0 12px;}
+.dep-cat{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:8px 12px; cursor:pointer; user-select:none; min-width:110px;}
+.dep-cat .dc-nom{font-size:.8rem; font-weight:700; color:var(--sub);}
+.dep-cat .dc-amt{font-size:1.05rem; font-weight:800; color:var(--text); margin-top:2px;}
+.dep-cat .dc-prev{font-size:.72rem; color:var(--sub); margin-top:1px;}
+.dep-cat.active{background:var(--accent); border-color:var(--accent);}
+.dep-cat.active .dc-nom,.dep-cat.active .dc-amt,.dep-cat.active .dc-prev{color:#fff;}
 .filters .tab{flex:none; padding:6px 14px; font-size:0.82rem;}
 .dep-row{display:flex; justify-content:space-between; align-items:center; padding:11px 12px; background:var(--card); border:1px solid var(--border); border-radius:11px; margin-bottom:8px;}
 .dep-left{font-size:0.9rem;}
@@ -363,6 +370,8 @@ main:has(#sec-equip.active), main:has(#sec-factures.active), main:has(#sec-docs.
       <div class="card"><div class="num" id="sumTotal">0 €</div><div class="lbl">Total</div></div>
     </div>
     <div id="depYearSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;"></div>
+    <div class="subhead" style="margin:6px 0 6px">Par rubrique <span style="font-weight:400;color:var(--sub);font-size:.78rem">— touchez une rubrique pour n'afficher qu'elle</span></div>
+    <div id="depCatSummary" class="dep-cats"></div>
     <button class="ghost add-btn" onclick="openListeAchatModal()">🖨️ Liste d'achat (matériel à prévoir)</button>
     <button class="add-btn" onclick="openDepModal()">+ Ajouter une dépense</button>
     <div class="filters">
@@ -1868,6 +1877,14 @@ document.querySelectorAll('[data-filt]').forEach(t=>{
     t.classList.add('active'); depFilter=t.dataset.filt; renderDep();
   });
 });
+let depCatFilter='toutes';
+document.addEventListener('click', e=>{
+  const c = e.target.closest && e.target.closest('[data-depcat]');
+  if(!c) return;
+  const v = c.dataset.depcat;
+  depCatFilter = (v===depCatFilter) ? 'toutes' : v;   // re-toucher la rubrique choisie = tout réafficher
+  renderDep();
+});
 let travFilter='tous';
 document.querySelectorAll('[data-filttrav]').forEach(t=>{
   t.addEventListener('click', ()=>{
@@ -2535,8 +2552,24 @@ function renderDep(){
     ).join('') : '';
   }
 
+  // Totaux par rubrique (dépensé = dépenses passées ; prévu = dépenses prévues + matériel à acheter)
+  const MAT_CAT = 'Achat équipement';
+  const cats = DEP_CATS_FIXES.concat((state.customDepCats||[]).slice().sort((a,b)=>a.localeCompare(b,'fr')));
+  state.depenses.forEach(d=>{ if(d.cat && !cats.includes(d.cat)) cats.push(d.cat); });
+  const parCat = {};
+  cats.forEach(c=>parCat[c]={passe:0, prevu:0});
+  state.depenses.forEach(d=>{ const c = parCat[d.cat]; if(!c) return; if(d.statut==='passée') c.passe += d.montant; else c.prevu += d.montant; });
+  if(parCat[MAT_CAT]) parCat[MAT_CAT].prevu += prevuAchats;
+  if(depCatFilter!=='toutes' && !parCat[depCatFilter]) depCatFilter = 'toutes';
+  const catBox = document.getElementById('depCatSummary');
+  if(catBox){
+    catBox.innerHTML = `<div class="dep-cat${depCatFilter==='toutes'?' active':''}" data-depcat="toutes"><div class="dc-nom">Toutes</div><div class="dc-amt">${fmtEuro(passe)}</div>${prevu?'<div class="dc-prev">prévu : '+fmtEuro(prevu)+'</div>':''}</div>`
+      + cats.map(c=>`<div class="dep-cat${depCatFilter===c?' active':''}" data-depcat="${escNotice(c)}"><div class="dc-nom">${escNotice(c)}</div><div class="dc-amt">${fmtEuro(parCat[c].passe)}</div>${parCat[c].prevu?'<div class="dc-prev">prévu : '+fmtEuro(parCat[c].prevu)+'</div>':''}</div>`).join('');
+  }
+
   let list = state.depenses.slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
   if(depFilter!=='tous') list = list.filter(d=>d.statut===depFilter);
+  if(depCatFilter!=='toutes') list = list.filter(d=>d.cat===depCatFilter);
   const box = document.getElementById('depList');
 
   // Regroupement par année pour l'affichage de la liste
@@ -2565,7 +2598,7 @@ function renderDep(){
 
   window._achatsAPrevoirCache = achatsAPrevoir;
   let achatsHtml = '';
-  if(depFilter!=='passée' && achatsAPrevoir.length>0){
+  if(depFilter!=='passée' && (depCatFilter==='toutes' || depCatFilter===MAT_CAT) && achatsAPrevoir.length>0){
     achatsHtml = `<div class="subhead" style="margin-top:${list.length?'16px':'0'}">🛒 Matériel à prévoir (Équipements &amp; Travaux)</div>` +
       achatsAPrevoir.map((a,i)=>{
         const sousInfo = [a.marque, a.lieu].filter(Boolean).join(' · ');
