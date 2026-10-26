@@ -2337,17 +2337,33 @@ function saveAchat(){
     lieu:document.getElementById('achLieu').value.trim(),
     notes:document.getElementById('achNotes').value.trim()
   };
-  if(source==='trav'){
-    const trav = state.travaux.find(t=>t.id===document.getElementById('achTravId').value);
-    if(achId) Object.assign(trav.achats.find(x=>x.id===achId), data);
-    else { trav.achats = trav.achats||[]; trav.achats.push({id:uid(), ...data}); }
-    save(); closeModal('ovAchat'); renderTravaux(); renderDep();
-  } else {
-    const eq = state.equipements.find(e=>e.id===document.getElementById('achEquipId').value);
-    if(achId) Object.assign(eq.achats.find(x=>x.id===achId), data);
-    else { eq.achats = eq.achats||[]; eq.achats.push({id:uid(), ...data}); }
-    save(); closeModal('ovAchat'); renderEquip(); renderDep();
+  const parentId = source==='trav' ? document.getElementById('achTravId').value : document.getElementById('achEquipId').value;
+  const parent = _getAchatParent(source, parentId);
+  if(!parent) return;
+  parent.achats = parent.achats||[];
+  let a;
+  if(achId){ a = parent.achats.find(x=>x.id===achId); Object.assign(a, data); }
+  else { a = {id:uid(), ...data}; parent.achats.push(a); }
+  // Pièce passée en « Acheté » depuis cette fenêtre : on crée (ou met à jour) la dépense,
+  // exactement comme avec la pastille « à acheter » → « acheté »
+  let depMsg = '';
+  if(a.etat==='1'){
+    const montant = Number(a.prix)||0;
+    const origine = source==='trav' ? parent.titre : parent.nom;
+    let dep = a.depenseId ? state.depenses.find(d=>d.id===a.depenseId) : null;
+    if(dep){ dep.montant = montant; }
+    else {
+      dep = { id:uid(), desc: a.article+' ('+origine+')', montant, date: new Date().toISOString().slice(0,10),
+              cat:'Achat équipement', statut:'passée', equipId: source==='equip'? parentId : '' };
+      state.depenses.push(dep);
+      a.depenseId = dep.id;
+      depMsg = 'Dépense ajoutée : '+fmtEuro(montant)+' (Dépenses > Passées)';
+    }
   }
+  save(); closeModal('ovAchat');
+  try{ if(source==='trav') renderTravaux(); else renderEquip(); }catch(e){ console.error(e); }
+  try{ renderDep(); }catch(e){ console.error(e); }
+  if(depMsg) toast(depMsg);
 }
 function deleteAchat(eqId, achId){
   const eq = state.equipements.find(e=>e.id===eqId);
