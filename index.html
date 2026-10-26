@@ -197,12 +197,21 @@ textarea.rt-area{min-height:170px; line-height:1.45; resize:vertical;}
 .tool-active{outline:2px solid var(--accent);}
 #printListArea{display:none;}
 @media print{
+  @page{margin:10mm 8mm;}
+  /* Impression sur plusieurs pages : la page ne doit plus être limitée à la hauteur de l'écran */
+  html, body{height:auto !important; min-height:0 !important; overflow:visible !important; background:#fff !important;}
   body > *:not(#printListArea){display:none !important;}
-  #printListArea{display:block !important; padding:20px; color:#000; background:#fff;}
+  #printListArea{display:block !important; position:static !important; padding:0; color:#000; background:#fff;}
   #printListArea h1{font-size:1.2rem; margin:0 0 4px;}
   #printListArea .print-date{font-size:0.8rem; color:#444; margin-bottom:16px;}
   #printListArea table{width:100%; border-collapse:collapse; font-size:0.85rem;}
-  #printListArea th,#printListArea td{border:1px solid #999; padding:6px 8px; text-align:left;}
+  #printListArea table.pl-achat{font-size:12pt;}
+  #printListArea table.pl-achat th{font-size:11pt;}
+  #printListArea thead{display:table-header-group;}
+  #printListArea tfoot{display:table-row-group;}
+  #printListArea tr{page-break-inside:avoid; break-inside:avoid;}
+  #printListArea th,#printListArea td{border:1px solid #999; padding:6px 8px; text-align:left; vertical-align:top;}
+  #printListArea td.pl-prix{white-space:nowrap; text-align:right;}
   #printListArea tfoot td{font-weight:700;}
   #printListArea .pt-task{border:1px solid #999; border-radius:6px; padding:8px 10px; margin-bottom:10px; page-break-inside:avoid; break-inside:avoid; font-size:0.85rem;}
   #printListArea .pt-head{display:flex; gap:10px; align-items:flex-start;}
@@ -1548,21 +1557,24 @@ function buildPrintListArea(items){
   const today = new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
   const total = items.reduce((s,a)=>s+a.prix,0);
   const rows = items.length? items.map(a=>`
-      <tr><td>${a.article}</td><td>${a.marque||'—'}</td><td>${a.ref||'—'}</td><td>${a.origine}</td><td>${a.lieu||'—'}</td><td>${fmtEuro(a.prix)}</td></tr>`).join('')
+      <tr><td>${rtEsc(a.article||'')}</td><td>${rtEsc(a.marque||'—')}</td><td>${rtEsc(a.ref||'—')}</td><td>${rtEsc(a.origine||'')}</td><td>${rtEsc(a.lieu||'—')}</td><td class="pl-prix">${fmtEuro(a.prix)}</td></tr>`).join('')
     : '<tr><td colspan="6">Aucun article à acheter.</td></tr>';
   document.getElementById('printListArea').innerHTML = `
     <h1>⛵ Kalin — Liste d'achat</h1>
     <div class="print-date">Matériel à prévoir · générée le ${today}</div>
-    <table>
+    <table class="pl-achat">
       <thead><tr><th>Article</th><th>Marque</th><th>Référence</th><th>Origine</th><th>Lieu d'achat</th><th>Prix estimé</th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="5">Total estimé</td><td>${fmtEuro(total)}</td></tr></tfoot>
+      <tfoot><tr><td colspan="5">Total estimé</td><td class="pl-prix">${fmtEuro(total)}</td></tr></tfoot>
     </table>`;
 }
 function printListeAchat(){
   const items = getAchatsAPrevoir();
   buildPrintListArea(items);
-  setTimeout(()=>window.print(), 50);
+  // On ferme la fenêtre de la liste avant d'imprimer : sur iPad, une fenêtre ouverte
+  // par-dessus la page peut empêcher l'impression des pages suivantes
+  closeModal('ovListeAchat');
+  setTimeout(()=>window.print(), 300);
 }
 function exportListeAchatCSV(){
   const items = getAchatsAPrevoir();
